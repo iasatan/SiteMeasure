@@ -257,7 +257,7 @@
   .editor-dimension { fill: var(--green); font: 700 0.28px "Avenir Next", sans-serif; text-anchor: middle; paint-order: stroke; stroke: #e1e5dd; stroke-width: 0.08px; }
   .editor-point { fill: var(--accent); stroke: #fff; stroke-width: 0.06; vector-effect: non-scaling-stroke; pointer-events: all; }
   .editor-draft { fill: none; stroke: var(--accent); stroke-width: 0.08; stroke-dasharray: 0.14 0.1; }
-  .grid-line { stroke: #64746d; stroke-width: 0.012; opacity: 0.23; vector-effect: non-scaling-stroke; }
+  .grid-line { stroke: #64746d; stroke-width: 1px; opacity: 0.35; vector-effect: non-scaling-stroke; }
   .editor-summary { min-height: 42px; padding: 11px 4px 7px; color: var(--muted); font-size: 0.75rem; }
   .editor-tool-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; padding: 5px 0 0; }
   .editor-tool-row .editor-icon-button { min-width: 0; min-height: 44px; padding-inline: 3px; }
