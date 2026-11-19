@@ -424,3 +424,13 @@
 
   @keyframes page-enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 }
+
+.field input.is-derived {
+  opacity: 0.7;
+  font-style: italic;
+}
+
+.field-error {
+  color: #b3261e;
+  margin: 0;
+}

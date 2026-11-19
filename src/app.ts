@@ -2,7 +2,7 @@ import { copyImportedProject, projectFilename, readProjectFile, serializeProject
 import { LocalStorageProjectRepository, type RepositoryWarning } from './data/local-storage-repository';
 import { createId, createProject, createRoom, type PhotoAnnotation, type Project, type ProjectPhoto, type ProjectSummary, type Room } from './domain/models';
 import { FloorPlanEditor, type EditorSelection } from './editor/floor-plan-editor';
-import { distanceBetween, formatLength, openingArea, polygonIssues, roomArea, roomVolume, wallArea } from './geometry';
+import { deriveOpeningSegments, distanceBetween, formatLength, openingArea, polygonIssues, roomArea, roomVolume, wallArea, type OpeningSegmentKey } from './geometry';
 import { BoschLaserMeasureAdapter } from './bluetooth/bosch-laser-measure-adapter';
 import { FakeLaserMeasureAdapter } from './bluetooth/fake-laser-measure-adapter';
 import { MeasurementCapture } from './bluetooth/measurement-capture';
@@ -250,6 +250,7 @@ export class SiteMeasureApp {
       onChange: (room, completed) => this.updateRoom(project, room, completed),
       onSelection: (selection) => this.updateInspector(selection),
       onMeasure: (wall) => this.showMeasurementDialog(project, active, wall),
+      onOpening: (kind, id) => this.showOpeningDialog(project, kind, id),
     });
     canvas.append(hierarchy, this.activeEditor.element);
 
@@ -333,7 +334,7 @@ export class SiteMeasureApp {
         wallActions.append(button('Copy', 'button quiet', () => this.activeEditor?.copySelection()));
         wallActions.append(button(wall.locked ? 'Unlock' : 'Lock', 'button quiet', () => this.activeEditor?.toggleLockSelection()));
         wallActions.append(button('Delete', 'button danger', () => this.activeEditor?.deleteSelection()));
-        inspector.append(length, editLength, wallActions);
+        inspector.append(length, editLength, this.cornerAngleField(), this.openingList(project), wallActions);
       }
     } else {
       const issues = polygonIssues(room.points).filter(() => room.points.length > 0);
@@ -346,6 +347,106 @@ export class SiteMeasureApp {
       inspector.append(element('p', 'inspector-help', 'Choose Wall or Room, then tap or drag on the plan. Use two fingers to pan and pinch to zoom.'));
       inspector.append(this.projectForm(project, 'autosave'));
     }
+  }
+
+  private cornerAngleField(): HTMLElement {
+    const angle = this.activeEditor?.getCornerAngle();
+    const group = element('div', 'field');
+    if (angle === null || angle === undefined) return group;
+    const label = element('span', 'field-label', 'Corner angle at wall end (°)');
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.inputMode = 'decimal';
+    input.value = String(Number(angle.toFixed(2)));
+    const apply = button('Set angle', 'button quiet compact', () => {
+      const degrees = parseDecimalInput(input.value);
+      if (!(degrees > 0 && degrees < 360) || !this.activeEditor?.setCornerAngle(degrees)) {
+        input.setCustomValidity('Enter an angle between 0 and 360 degrees.');
+        input.reportValidity();
+      }
+    });
+    input.addEventListener('input', () => input.setCustomValidity(''));
+    group.append(label, input, apply);
+    return group;
+  }
+
+  private openingList(project: Project): HTMLElement {
+    const list = element('div', 'selection-actions');
+    for (const { kind, opening } of this.activeEditor?.getWallOpenings() ?? []) {
+      list.append(button(`Edit ${kind} (${formatLength(opening.widthMeters, project.preferredUnits)})`, 'button quiet', () => this.showOpeningDialog(project, kind, opening.id)));
+    }
+    return list;
+  }
+
+  private showOpeningDialog(project: Project, kind: 'door' | 'window', id: string): void {
+    const found = this.activeEditor?.getOpening(kind, id);
+    if (!found) return;
+    const imperial = project.preferredUnits === 'imperial';
+    const factor = imperial ? 3.280839895 : 1;
+    const total = distanceBetween(found.wall.start, found.wall.end);
+    const values: Record<OpeningSegmentKey, number> = {
+      total,
+      before: found.opening.offsetMeters,
+      width: found.opening.widthMeters,
+      after: Math.max(0, total - found.opening.offsetMeters - found.opening.widthMeters),
+    };
+    const labels: Record<OpeningSegmentKey, string> = { total: 'Wall length', before: 'Wall before the opening', width: `${kind === 'door' ? 'Door' : 'Window'} width`, after: 'Wall after the opening' };
+    const keys: OpeningSegmentKey[] = ['total', 'before', 'width', 'after'];
+    // Most recently edited first; the last entry is the derived value.
+    const recency: OpeningSegmentKey[] = ['total', 'width', 'before', 'after'];
+    const inputs = new Map<OpeningSegmentKey, HTMLInputElement>();
+    const content = element('div', 'dialog-content');
+    content.append(element('p', 'eyebrow', kind === 'door' ? 'Door' : 'Window'), element('h2', 'dialog-title', 'Wall segments'));
+    content.append(element('p', 'measurement-target', `Enter any three values in ${imperial ? 'feet' : 'meters'}; the fourth is calculated.`));
+    const format = (meters: number) => (meters * factor).toFixed(imperial ? 2 : 3);
+    const refresh = () => {
+      const derived = recency[recency.length - 1];
+      const entered = { ...values };
+      for (const key of keys) if (key !== derived) entered[key] = parseDecimalInput(inputs.get(key)?.value ?? '') / factor;
+      Object.assign(values, deriveOpeningSegments(entered, derived));
+      for (const key of keys) {
+        const input = inputs.get(key);
+        if (!input) continue;
+        input.readOnly = key === derived;
+        input.classList.toggle('is-derived', key === derived);
+        if (key === derived) input.value = format(values[key]);
+      }
+    };
+    for (const key of keys) {
+      const field = document.createElement('label');
+      field.className = 'field';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.inputMode = 'decimal';
+      input.value = format(values[key]);
+      input.addEventListener('input', () => {
+        input.setCustomValidity('');
+        recency.splice(recency.indexOf(key), 1);
+        recency.unshift(key);
+        refresh();
+      });
+      inputs.set(key, input);
+      field.append(element('span', 'field-label', labels[key]), input);
+      content.append(field);
+    }
+    refresh();
+    const dialog = this.dialog();
+    const error = element('p', 'field-error');
+    error.setAttribute('role', 'alert');
+    content.append(error);
+    const actions = element('div', 'dialog-actions');
+    actions.append(button('Cancel', 'button quiet', () => dialog.close()));
+    actions.append(button('Apply', 'button primary', () => {
+      const valid = keys.every((key) => Number.isFinite(values[key])) && values.total > 0 && values.width > 0 && values.before >= 0 && values.after >= -1e-9;
+      if (!valid || !this.activeEditor?.updateOpening(kind, id, values.total, values.before, values.width)) {
+        error.textContent = 'The segments must be positive and add up to the wall length.';
+        return;
+      }
+      dialog.close();
+    }));
+    content.append(actions);
+    dialog.replaceChildren(content);
+    this.openDialog(dialog);
   }
 
   private showMeasurementDialog(project: Project, room: Room, wall: Project['buildings'][number]['floors'][number]['rooms'][number]['walls'][number]): void {

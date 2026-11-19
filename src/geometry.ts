@@ -110,3 +110,69 @@ function segmentsIntersect(a: Point, b: Point, c: Point, d: Point): boolean {
   if (((abC > EPSILON && abD < -EPSILON) || (abC < -EPSILON && abD > EPSILON)) && ((cdA > EPSILON && cdB < -EPSILON) || (cdA < -EPSILON && cdB > EPSILON))) return true;
   return (Math.abs(abC) <= EPSILON && onSegment(a, c, b)) || (Math.abs(abD) <= EPSILON && onSegment(a, d, b)) || (Math.abs(cdA) <= EPSILON && onSegment(c, a, d)) || (Math.abs(cdB) <= EPSILON && onSegment(c, b, d));
 }
+
+export type OpeningSegmentKey = 'total' | 'before' | 'width' | 'after';
+export type OpeningSegments = Record<OpeningSegmentKey, number>;
+
+/** A wall with an opening splits into before + width + after = total; derive the one segment that was not given. */
+export function deriveOpeningSegments(values: OpeningSegments, derived: OpeningSegmentKey): OpeningSegments {
+  const result = { ...values };
+  if (derived === 'total') result.total = values.before + values.width + values.after;
+  else if (derived === 'before') result.before = values.total - values.width - values.after;
+  else if (derived === 'width') result.width = values.total - values.before - values.after;
+  else result.after = values.total - values.before - values.width;
+  return result;
+}
+
+/** Projects the pointer onto the line through `from` that is perpendicular to the segment `previous -> from`. */
+export function perpendicularPoint(previous: Point, from: Point, pointer: Point): Point {
+  const dx = from.xMeters - previous.xMeters;
+  const dy = from.yMeters - previous.yMeters;
+  const length = Math.hypot(dx, dy);
+  if (length <= EPSILON) return pointer;
+  const nx = -dy / length;
+  const ny = dx / length;
+  const distance = (pointer.xMeters - from.xMeters) * nx + (pointer.yMeters - from.yMeters) * ny;
+  return { xMeters: from.xMeters + nx * distance, yMeters: from.yMeters + ny * distance };
+}
+
+function signedArea(points: Point[]): number {
+  return points.reduce((sum, point, index) => {
+    const next = points[(index + 1) % points.length];
+    return sum + point.xMeters * next.yMeters - next.xMeters * point.yMeters;
+  }, 0);
+}
+
+function isClosedLoop(walls: Wall[]): boolean {
+  return walls.length >= 3 && walls.every((wall, index) => distanceBetween(wall.end, walls[(index + 1) % walls.length].start) < 0.05);
+}
+
+/** Interior angle in degrees at the end of walls[index] (between it and the next wall), or null when the walls are not a closed loop. */
+export function cornerAngleDegrees(walls: Wall[], index: number): number | null {
+  if (!isClosedLoop(walls)) return null;
+  const wall = walls[index];
+  const next = walls[(index + 1) % walls.length];
+  const orientation = Math.sign(signedArea(walls.map((candidate) => candidate.start))) || 1;
+  const vertex = wall.end;
+  const back = Math.atan2(wall.start.yMeters - vertex.yMeters, wall.start.xMeters - vertex.xMeters);
+  const forward = Math.atan2(next.end.yMeters - vertex.yMeters, next.end.xMeters - vertex.xMeters);
+  const turn = (orientation * (back - forward) + 4 * Math.PI) % (2 * Math.PI);
+  return (turn * 180) / Math.PI;
+}
+
+/** Rotates the next wall around the shared corner so the interior angle becomes `degrees`; the wall lengths are kept. Returns false when not possible. */
+export function setCornerAngle(walls: Wall[], index: number, degrees: number): boolean {
+  if (!isClosedLoop(walls) || !(degrees > 0 && degrees < 360)) return false;
+  const wall = walls[index];
+  const next = walls[(index + 1) % walls.length];
+  const following = walls[(index + 2) % walls.length];
+  const orientation = Math.sign(signedArea(walls.map((candidate) => candidate.start))) || 1;
+  const vertex = wall.end;
+  const back = Math.atan2(wall.start.yMeters - vertex.yMeters, wall.start.xMeters - vertex.xMeters);
+  const forward = back - orientation * (degrees * Math.PI) / 180;
+  const length = distanceBetween(next.start, next.end);
+  next.end = { xMeters: vertex.xMeters + Math.cos(forward) * length, yMeters: vertex.yMeters + Math.sin(forward) * length };
+  delete next.lengthMeters;
+  if (following !== wall && following !== next) following.start = { ...next.end };
+  return true;
+}
