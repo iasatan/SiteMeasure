@@ -251,6 +251,8 @@
   .editor-wall-hit { stroke: transparent; stroke-width: 0.7; }
   .editor-wall { stroke: var(--green); stroke-width: 0.1; stroke-linecap: square; }
   .editor-wall.is-selected { stroke: var(--accent); stroke-width: 0.14; }
+  .editor-object { fill: color-mix(in srgb, var(--accent) 12%, white); stroke: var(--green); stroke-width: 0.05; }
+  .editor-object.is-selected { stroke: var(--accent); stroke-width: 0.1; }
   .editor-opening { stroke: #dce2da; stroke-width: 0.2; }
   .editor-window { stroke: #2782a5; stroke-width: 0.09; }
   .editor-door { stroke: var(--accent); stroke-width: 0.13; stroke-dasharray: 0.08 0.07; }
