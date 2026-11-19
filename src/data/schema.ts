@@ -132,6 +132,7 @@ function validateRoom(value: unknown, path: string): void {
     expectString(object.id, `${path}.objects[${index}].id`, false);
     expectString(object.name, `${path}.objects[${index}].name`, false);
     for (const key of ['widthMeters', 'depthMeters', 'heightMeters']) expectFinite(object[key], `${path}.objects[${index}].${key}`, 0.001, 1000);
+    for (const key of ['xMeters', 'yMeters']) if (object[key] !== undefined) expectFinite(object[key], `${path}.objects[${index}].${key}`, -100000, 100000);
   });
   expectArray(room.notes, `${path}.notes`).forEach((note, index) => expectString(note, `${path}.notes[${index}]`));
 }

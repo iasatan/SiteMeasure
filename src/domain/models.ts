@@ -44,6 +44,8 @@ export interface RoomObject {
   widthMeters: number;
   depthMeters: number;
   heightMeters: number;
+  xMeters?: number;
+  yMeters?: number;
 }
 
 export interface Measurement {

@@ -1,8 +1,8 @@
-import { createId, type Door, type Point, type Room, type Wall, type Window } from '../domain/models';
+import { createId, type Door, type Point, type Room, type RoomObject, type Wall, type Window } from '../domain/models';
 import { cornerAngleDegrees, distanceBetween, formatLength, nearestPointOnSegment, perpendicularPoint, polygonIssues, roomArea, setCornerAngle, snapPoint } from '../geometry';
 
-export type EditorTool = 'select' | 'wall' | 'room' | 'door' | 'window' | 'measure';
-export type EditorSelection = { type: 'wall' | 'room'; id: string } | null;
+export type EditorTool = 'select' | 'wall' | 'room' | 'door' | 'window' | 'object' | 'measure';
+export type EditorSelection = { type: 'wall' | 'room' | 'object'; id: string } | null;
 
 export interface FloorPlanEditorOptions {
   room: Room;
@@ -10,6 +10,7 @@ export interface FloorPlanEditorOptions {
   onChange(room: Room, completed: boolean): void;
   onSelection(selection: EditorSelection): void;
   onMeasure?(wall: Wall): void;
+  onMeasureObject?(id: string): void;
   onOpening?(kind: OpeningKind, id: string): void;
 }
 
@@ -36,6 +37,7 @@ export class FloorPlanEditor {
   private readonly onChange: FloorPlanEditorOptions['onChange'];
   private readonly onSelection: FloorPlanEditorOptions['onSelection'];
   private readonly onMeasure: FloorPlanEditorOptions['onMeasure'];
+  private readonly onMeasureObject: FloorPlanEditorOptions['onMeasureObject'];
   private readonly onOpening: FloorPlanEditorOptions['onOpening'];
   private readonly svg: SVGSVGElement;
   private readonly controls: HTMLElement;
@@ -44,6 +46,7 @@ export class FloorPlanEditor {
   private selection: EditorSelection = null;
   private drawingPoints: Point[] = [];
   private wallStart: Point | null = null;
+  private objectStart: Point | null = null;
   private readonly pointers = new Map<number, PointerSnapshot>();
   private dragOrigin: Point | null = null;
   private dragEndpoint: 'start' | 'end' | null = null;
@@ -66,6 +69,7 @@ export class FloorPlanEditor {
     this.onChange = options.onChange;
     this.onSelection = options.onSelection;
     this.onMeasure = options.onMeasure;
+    this.onMeasureObject = options.onMeasureObject;
     this.onOpening = options.onOpening;
     this.element = document.createElement('div');
     this.element.className = 'floor-editor';
@@ -100,6 +104,7 @@ export class FloorPlanEditor {
   setTool(tool: EditorTool): void {
     this.tool = tool;
     this.wallStart = null;
+    this.objectStart = null;
     this.drawingPoints = [];
     this.render();
   }
@@ -215,7 +220,9 @@ export class FloorPlanEditor {
   deleteSelection(): void {
     if (!this.selection) return;
     this.beginAction();
-    if (this.selection.type === 'wall') {
+    if (this.selection.type === 'object') {
+      this.room.objects = this.room.objects.filter((object) => object.id !== this.selection?.id);
+    } else if (this.selection.type === 'wall') {
       this.room.walls = this.room.walls.filter((wall) => wall.id !== this.selection?.id);
       this.room.doors = this.room.doors.filter((door) => door.wallId !== this.selection?.id);
       this.room.windows = this.room.windows.filter((window) => window.wallId !== this.selection?.id);
@@ -374,7 +381,7 @@ export class FloorPlanEditor {
       return;
     }
 
-    const target = (event.target as Element).closest<SVGElement>('[data-wall-id], [data-room-id]');
+    const target = (event.target as Element).closest<SVGElement>('[data-wall-id], [data-object-id], [data-room-id]');
     if (this.handleToolPointer(world, target)) return;
     this.handleSelectionPointer(world, target);
   }
@@ -383,6 +390,7 @@ export class FloorPlanEditor {
     if (this.tool === 'wall') this.addWallPoint(world);
     else if (this.tool === 'room') this.addRoomPoint(world);
     else if (this.tool === 'door' || this.tool === 'window') this.handleOpeningPointer(world, target);
+    else if (this.tool === 'object') this.addObjectPoint(world);
     else if (this.tool === 'measure') this.handleMeasurePointer(target);
     else return false;
     return true;
@@ -396,6 +404,11 @@ export class FloorPlanEditor {
   }
 
   private handleMeasurePointer(target: SVGElement | null): void {
+    if (target?.dataset.objectId) {
+      this.select({ type: 'object', id: target.dataset.objectId });
+      this.onMeasureObject?.(target.dataset.objectId);
+      return;
+    }
     const wall = this.room.walls.find((candidate) => candidate.id === target?.dataset.wallId);
     if (!wall) return;
     this.select({ type: 'wall', id: wall.id });
@@ -408,6 +421,12 @@ export class FloorPlanEditor {
       if (this.selectedWall()?.locked) return;
       this.dragOrigin = world;
       this.dragEndpoint = target.dataset.endpoint === 'start' || target.dataset.endpoint === 'end' ? target.dataset.endpoint : null;
+      this.originalRoom = structuredClone(this.room);
+      return;
+    }
+    if (target?.dataset.objectId) {
+      this.select({ type: 'object', id: target.dataset.objectId });
+      this.dragOrigin = world;
       this.originalRoom = structuredClone(this.room);
       return;
     }
@@ -429,6 +448,7 @@ export class FloorPlanEditor {
     this.pointers.set(event.pointerId, { ...pointer, screenX: event.clientX, screenY: event.clientY, world });
 
     if (this.handlePinchMove()) return;
+    if (this.handleObjectDrag(world)) return;
     if (this.handleWallDrag(world)) return;
     this.handlePanMove(world);
   }
@@ -444,6 +464,18 @@ export class FloorPlanEditor {
     this.viewBox.x = midpoint.xMeters - this.viewBox.width / 2;
     this.viewBox.y = midpoint.yMeters - this.viewBox.height / 2;
     this.updateViewBox();
+    return true;
+  }
+
+  private handleObjectDrag(world: Point): boolean {
+    if (!this.dragOrigin || this.selection?.type !== 'object' || !this.originalRoom) return false;
+    const original = this.originalRoom.objects.find((candidate) => candidate.id === this.selection?.id);
+    const object = this.room.objects.find((candidate) => candidate.id === this.selection?.id);
+    if (!original || !object || original.xMeters === undefined || original.yMeters === undefined) return true;
+    const moved = this.normalizedPoint({ xMeters: original.xMeters + world.xMeters - this.dragOrigin.xMeters, yMeters: original.yMeters + world.yMeters - this.dragOrigin.yMeters });
+    object.xMeters = moved.xMeters;
+    object.yMeters = moved.yMeters;
+    this.renderGeometryOnly();
     return true;
   }
 
@@ -542,6 +574,42 @@ export class FloorPlanEditor {
       return horizontal ? { xMeters: point.xMeters, yMeters: from.yMeters } : { xMeters: from.xMeters, yMeters: point.yMeters };
     }
     return perpendicularPoint(previous, from, point);
+  }
+
+  private addObjectPoint(world: Point): void {
+    const point = this.normalizedPoint(world);
+    if (!this.objectStart) {
+      this.objectStart = point;
+      this.render();
+      return;
+    }
+    const width = Math.abs(point.xMeters - this.objectStart.xMeters);
+    const depth = Math.abs(point.yMeters - this.objectStart.yMeters);
+    if (width < 0.05 || depth < 0.05) return;
+    this.beginAction();
+    const object: RoomObject = {
+      id: createId(),
+      name: `Object ${this.room.objects.length + 1}`,
+      widthMeters: width,
+      depthMeters: depth,
+      heightMeters: 1,
+      xMeters: Math.min(point.xMeters, this.objectStart.xMeters),
+      yMeters: Math.min(point.yMeters, this.objectStart.yMeters),
+    };
+    this.room.objects.push(object);
+    this.objectStart = null;
+    this.selection = { type: 'object', id: object.id };
+    this.onSelection(this.selection);
+    this.commitAction();
+  }
+
+  updateObject(id: string, changes: Partial<Pick<RoomObject, 'name' | 'widthMeters' | 'depthMeters' | 'heightMeters'>>): boolean {
+    const object = this.room.objects.find((candidate) => candidate.id === id);
+    if (!object) return false;
+    this.beginAction();
+    Object.assign(object, changes);
+    this.commitAction();
+    return true;
   }
 
   private addRoomPoint(world: Point): void {
@@ -690,6 +758,7 @@ export class FloorPlanEditor {
       this.svg.append(polygon);
     }
     for (const wall of this.room.walls) this.svg.append(...this.buildWall(wall));
+    for (const object of this.room.objects) this.svg.append(...this.buildObject(object));
     for (const door of this.room.doors) this.svg.append(this.buildOpening(door, 'door'));
     for (const window of this.room.windows) this.svg.append(this.buildOpening(window, 'window'));
     if (this.drawingPoints.length) {
@@ -703,6 +772,7 @@ export class FloorPlanEditor {
       this.svg.append(points);
     }
     if (this.wallStart) this.svg.append(this.pointMarker(this.wallStart));
+    if (this.objectStart) this.svg.append(this.pointMarker(this.objectStart));
   }
 
   private buildWall(wall: Wall): SVGElement[] {
@@ -730,6 +800,32 @@ export class FloorPlanEditor {
       return [hit, line, dimension, startMarker, endMarker];
     }
     return [hit, line, dimension];
+  }
+
+  private buildObject(object: RoomObject): SVGElement[] {
+    if (object.xMeters === undefined || object.yMeters === undefined) return [];
+    const rect = svgElement('rect', 'editor-object');
+    rect.setAttribute('x', String(object.xMeters));
+    rect.setAttribute('y', String(object.yMeters));
+    rect.setAttribute('width', String(object.widthMeters));
+    rect.setAttribute('height', String(object.depthMeters));
+    rect.dataset.objectId = object.id;
+    if (this.selection?.type === 'object' && this.selection.id === object.id) rect.classList.add('is-selected');
+    const width = svgElement('text', 'editor-dimension');
+    width.setAttribute('x', String(object.xMeters + object.widthMeters / 2));
+    width.setAttribute('y', String(object.yMeters - 0.12));
+    width.textContent = formatLength(object.widthMeters, this.units);
+    const depth = svgElement('text', 'editor-dimension');
+    depth.setAttribute('x', String(object.xMeters + object.widthMeters + 0.12));
+    depth.setAttribute('y', String(object.yMeters + object.depthMeters / 2));
+    depth.style.textAnchor = 'start';
+    depth.textContent = formatLength(object.depthMeters, this.units);
+    const label = svgElement('text', 'editor-dimension');
+    label.setAttribute('x', String(object.xMeters + object.widthMeters / 2));
+    label.setAttribute('y', String(object.yMeters + object.depthMeters / 2 + 0.1));
+    label.textContent = object.name;
+    for (const item of [width, depth, label]) item.dataset.objectId = object.id;
+    return [rect, width, depth, label];
   }
 
   private buildOpening(opening: Door | Window, type: 'door' | 'window'): SVGElement {
@@ -770,7 +866,7 @@ export class FloorPlanEditor {
 
   private renderTools(): void {
     this.controls.replaceChildren();
-    const tools: Array<[EditorTool, string]> = [['select', 'Select'], ['wall', 'Wall'], ['room', 'Room'], ['door', 'Door'], ['window', 'Window'], ['measure', 'Measure']];
+    const tools: Array<[EditorTool, string]> = [['select', 'Select'], ['wall', 'Wall'], ['room', 'Room'], ['door', 'Door'], ['window', 'Window'], ['object', 'Object'], ['measure', 'Measure']];
     for (const [tool, label] of tools) {
       const button = this.actionButton(label, `${label} tool`, () => this.setTool(tool), this.tool === tool);
       this.controls.append(button);
@@ -810,7 +906,11 @@ export class FloorPlanEditor {
   }
 
   private fitDrawing(): void {
-    const points = [...this.room.points, ...this.room.walls.flatMap((wall) => [wall.start, wall.end])];
+    const objectCorners = this.room.objects.flatMap((object) => object.xMeters === undefined || object.yMeters === undefined ? [] : [
+      { xMeters: object.xMeters, yMeters: object.yMeters },
+      { xMeters: object.xMeters + object.widthMeters, yMeters: object.yMeters + object.depthMeters },
+    ]);
+    const points = [...this.room.points, ...this.room.walls.flatMap((wall) => [wall.start, wall.end]), ...objectCorners];
     if (!points.length) {
       this.viewBox = { x: -1, y: -1, width: 14, height: 11 };
     } else {
@@ -868,6 +968,7 @@ function toolHint(tool: EditorTool, roomPointCount: number): string {
     room: roomPointCount ? `${roomPointCount} room vertices · tap the first point or Finish room` : 'Tap each room corner, then tap the first point.',
     door: 'Tap a wall to place a door.',
     window: 'Tap a wall to place a window.',
-    measure: 'Tap a wall to enter its measured length.',
+    object: 'Tap two opposite corners to draw an object.',
+    measure: 'Tap a wall or object to enter its measured size.',
   }[tool];
 }
