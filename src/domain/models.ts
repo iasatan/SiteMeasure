@@ -18,11 +18,16 @@ export interface Wall {
   locked?: boolean;
 }
 
+export const DEFAULT_ROOM_HEIGHT_METERS = 2.7;
+export const DEFAULT_DOOR_HEIGHT_METERS = 2.1;
+export const DEFAULT_WINDOW_HEIGHT_METERS = 1.2;
+
 export interface Door {
   id: string;
   wallId: string;
   offsetMeters: number;
   widthMeters: number;
+  heightMeters?: number;
 }
 
 export interface Window {
@@ -30,6 +35,15 @@ export interface Window {
   wallId: string;
   offsetMeters: number;
   widthMeters: number;
+  heightMeters?: number;
+}
+
+export interface RoomObject {
+  id: string;
+  name: string;
+  widthMeters: number;
+  depthMeters: number;
+  heightMeters: number;
 }
 
 export interface Measurement {
@@ -72,12 +86,13 @@ export interface ProjectPhoto {
 export interface Room {
   id: string;
   name: string;
+  heightMeters?: number;
   points: Point[];
   walls: Wall[];
   doors: Door[];
   windows: Window[];
   openings: never[];
-  objects: never[];
+  objects: RoomObject[];
   measurements: Measurement[];
   photos: ProjectPhoto[];
   notes: string[];
