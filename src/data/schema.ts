@@ -63,6 +63,7 @@ function validateRoom(value: unknown, path: string): void {
   const room = expectRecord(value, path);
   expectString(room.id, `${path}.id`, false);
   expectString(room.name, `${path}.name`, false);
+  if (room.heightMeters !== undefined) expectFinite(room.heightMeters, `${path}.heightMeters`, 0.1, 100);
   expectArray(room.points, `${path}.points`).forEach((point, index) => validatePoint(point, `${path}.points[${index}]`));
   expectArray(room.walls, `${path}.walls`).forEach((wallValue, index) => {
     const wall = expectRecord(wallValue, `${path}.walls[${index}]`);
@@ -80,6 +81,7 @@ function validateRoom(value: unknown, path: string): void {
       expectString(opening.wallId, `${path}.${type}[${index}].wallId`, false);
       expectFinite(opening.offsetMeters, `${path}.${type}[${index}].offsetMeters`, 0, 1_000_000);
       expectFinite(opening.widthMeters, `${path}.${type}[${index}].widthMeters`, 0.001, 1_000_000);
+      if (opening.heightMeters !== undefined) expectFinite(opening.heightMeters, `${path}.${type}[${index}].heightMeters`, 0.01, 100);
     });
   }
   expectArray(room.measurements, `${path}.measurements`).forEach((measurementValue, index) => {
@@ -124,7 +126,13 @@ function validateRoom(value: unknown, path: string): void {
       if (typeof annotation.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(annotation.color)) throw new ProjectValidationError(`${annotationPath}.color is invalid.`);
     });
   });
-  for (const collection of ['openings', 'objects']) expectArray(room[collection], `${path}.${collection}`);
+  expectArray(room.openings, `${path}.openings`);
+  expectArray(room.objects, `${path}.objects`).forEach((objectValue, index) => {
+    const object = expectRecord(objectValue, `${path}.objects[${index}]`);
+    expectString(object.id, `${path}.objects[${index}].id`, false);
+    expectString(object.name, `${path}.objects[${index}].name`, false);
+    for (const key of ['widthMeters', 'depthMeters', 'heightMeters']) expectFinite(object[key], `${path}.objects[${index}].${key}`, 0.001, 1000);
+  });
   expectArray(room.notes, `${path}.notes`).forEach((note, index) => expectString(note, `${path}.notes[${index}]`));
 }
 

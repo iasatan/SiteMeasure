@@ -1,4 +1,4 @@
-import type { Point, Room, Wall } from './domain/models';
+import { DEFAULT_DOOR_HEIGHT_METERS, DEFAULT_ROOM_HEIGHT_METERS, DEFAULT_WINDOW_HEIGHT_METERS, type Point, type Room, type Wall } from './domain/models';
 
 const EPSILON = 1e-7;
 
@@ -28,18 +28,25 @@ export function wallLength(wall: Wall): number {
   return wall.lengthMeters ?? distanceBetween(wall.start, wall.end);
 }
 
-export function roomVolume(room: Room, ceilingHeightMeters = 2.7): number {
+export function roomHeight(room: Room): number {
+  return room.heightMeters ?? DEFAULT_ROOM_HEIGHT_METERS;
+}
+
+export function roomVolume(room: Room, ceilingHeightMeters = roomHeight(room)): number {
   return roomArea(room) * ceilingHeightMeters;
 }
 
-export function wallArea(walls: Wall[], heightMeters = 2.7, openingArea = 0): number {
+export function wallArea(walls: Wall[], heightMeters = DEFAULT_ROOM_HEIGHT_METERS, openingArea = 0): number {
   return Math.max(0, walls.reduce((sum, wall) => sum + wallLength(wall) * heightMeters, 0) - openingArea);
 }
 
 export function openingArea(walls: Wall[], room: Room): number {
   const lengths = new Map(walls.map((wall) => [wall.id, wallLength(wall)]));
-  const openings = [...room.doors, ...room.windows];
-  return openings.reduce((sum, opening) => sum + (lengths.has(opening.wallId) ? opening.widthMeters * 2.1 : 0), 0);
+  const openings = [
+    ...room.doors.map((opening) => ({ opening, height: opening.heightMeters ?? DEFAULT_DOOR_HEIGHT_METERS })),
+    ...room.windows.map((opening) => ({ opening, height: opening.heightMeters ?? DEFAULT_WINDOW_HEIGHT_METERS })),
+  ];
+  return openings.reduce((sum, { opening, height }) => sum + (lengths.has(opening.wallId) ? opening.widthMeters * height : 0), 0);
 }
 
 export function metersToFeet(meters: number): number {

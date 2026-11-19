@@ -265,7 +265,7 @@ export class FloorPlanEditor {
     return opening && wall ? structuredClone({ opening, wall }) : null;
   }
 
-  updateOpening(kind: OpeningKind, id: string, wallLengthMeters: number, offsetMeters: number, widthMeters: number): boolean {
+  updateOpening(kind: OpeningKind, id: string, wallLengthMeters: number, offsetMeters: number, widthMeters: number, heightMeters?: number): boolean {
     const opening = (kind === 'door' ? this.room.doors : this.room.windows).find((candidate) => candidate.id === id);
     const wall = opening ? this.room.walls.find((candidate) => candidate.id === opening.wallId) : undefined;
     if (!opening || !wall || wallLengthMeters <= 0 || widthMeters <= 0 || offsetMeters < 0) return false;
@@ -276,6 +276,7 @@ export class FloorPlanEditor {
     }
     opening.offsetMeters = offsetMeters;
     opening.widthMeters = widthMeters;
+    if (heightMeters !== undefined) opening.heightMeters = heightMeters;
     this.commitAction();
     return true;
   }

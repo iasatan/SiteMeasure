@@ -1,8 +1,8 @@
 import { copyImportedProject, projectFilename, readProjectFile, serializeProject } from './data/project-files';
 import { LocalStorageProjectRepository, type RepositoryWarning } from './data/local-storage-repository';
-import { createId, createProject, createRoom, type PhotoAnnotation, type Project, type ProjectPhoto, type ProjectSummary, type Room } from './domain/models';
+import { createId, createProject, createRoom, DEFAULT_DOOR_HEIGHT_METERS, DEFAULT_WINDOW_HEIGHT_METERS, type PhotoAnnotation, type Project, type ProjectPhoto, type ProjectSummary, type Room } from './domain/models';
 import { FloorPlanEditor, type EditorSelection } from './editor/floor-plan-editor';
-import { deriveOpeningSegments, distanceBetween, formatLength, openingArea, polygonIssues, roomArea, roomVolume, wallArea, type OpeningSegmentKey } from './geometry';
+import { deriveOpeningSegments, distanceBetween, formatLength, openingArea, polygonIssues, roomArea, roomHeight, roomVolume, wallArea, type OpeningSegmentKey } from './geometry';
 import { BoschLaserMeasureAdapter } from './bluetooth/bosch-laser-measure-adapter';
 import { FakeLaserMeasureAdapter } from './bluetooth/fake-laser-measure-adapter';
 import { MeasurementCapture } from './bluetooth/measurement-capture';
@@ -244,7 +244,7 @@ export class SiteMeasureApp {
 
     const canvas = element('div', 'plan-canvas');
     const hierarchy = element('div', 'plan-hierarchy');
-    hierarchy.append(this.roomSelector(project), button('Rename', 'button quiet compact', () => this.renameRoom(project, active)));
+    hierarchy.append(this.roomSelector(project), button('Rename', 'button quiet compact', () => this.renameRoom(project, active)), button('Delete', 'button danger compact', () => this.confirmDeleteRoom(project, active)));
     this.activeEditor = new FloorPlanEditor({
       room: active,
       units: project.preferredUnits,
@@ -341,9 +341,9 @@ export class SiteMeasureApp {
       const issues = polygonIssues(room.points).filter(() => room.points.length > 0);
       const metrics = element('div', 'room-calculations');
       metrics.append(calculation(`${roomArea(room).toFixed(2)} m²`, 'Area'));
-      metrics.append(calculation(`${roomVolume(room).toFixed(2)} m³`, 'Volume at 2.7 m'));
-      metrics.append(calculation(`${wallArea(room.walls, 2.7, openingArea(room.walls, room)).toFixed(2)} m²`, 'Net wall area'));
-      inspector.append(metrics);
+      metrics.append(calculation(`${roomVolume(room).toFixed(2)} m³`, `Volume at ${roomHeight(room).toFixed(2)} m`));
+      metrics.append(calculation(`${wallArea(room.walls, roomHeight(room), openingArea(room.walls, room)).toFixed(2)} m²`, 'Net wall area'));
+      inspector.append(metrics, this.roomHeightField(project, room), this.objectsSection(project, room));
       if (issues.length) inspector.append(element('p', 'validation-warning', issues.join(' ')));
       inspector.append(element('p', 'inspector-help', 'Choose Wall or Room, then tap or drag on the plan. Use two fingers to pan and pinch to zoom.'));
       inspector.append(this.projectForm(project, 'autosave'));
@@ -431,6 +431,14 @@ export class SiteMeasureApp {
       content.append(field);
     }
     refresh();
+    const heightInput = document.createElement('input');
+    heightInput.type = 'text';
+    heightInput.inputMode = 'decimal';
+    heightInput.value = format(found.opening.heightMeters ?? (kind === 'door' ? DEFAULT_DOOR_HEIGHT_METERS : DEFAULT_WINDOW_HEIGHT_METERS));
+    const heightField = document.createElement('label');
+    heightField.className = 'field';
+    heightField.append(element('span', 'field-label', `${kind === 'door' ? 'Door' : 'Window'} height`), heightInput);
+    content.append(heightField);
     const dialog = this.dialog();
     const error = element('p', 'field-error');
     error.setAttribute('role', 'alert');
@@ -439,8 +447,9 @@ export class SiteMeasureApp {
     actions.append(button('Cancel', 'button quiet', () => dialog.close()));
     actions.append(button('Apply', 'button primary', () => {
       const valid = keys.every((key) => Number.isFinite(values[key])) && values.total > 0 && values.width > 0 && values.before >= 0 && values.after >= -1e-9;
-      if (!valid || !this.activeEditor?.updateOpening(kind, id, values.total, values.before, values.width)) {
-        error.textContent = 'The segments must be positive and add up to the wall length.';
+      const height = parseDecimalInput(heightInput.value) / factor;
+      if (!valid || !(height > 0 && height <= 100) || !this.activeEditor?.updateOpening(kind, id, values.total, values.before, values.width, height)) {
+        error.textContent = 'The segments and height must be positive and the segments must add up to the wall length.';
         return;
       }
       dialog.close();
@@ -638,6 +647,127 @@ export class SiteMeasureApp {
     this.activeRoomId = room.id;
     project.modifiedAt = new Date().toISOString();
     if (this.save(project)) this.render();
+  }
+
+  private confirmDeleteRoom(project: Project, room: Room): void {
+    const rooms = project.buildings.flatMap((building) => building.floors.flatMap((floor) => floor.rooms));
+    if (rooms.length <= 1) {
+      this.showToast('A project needs at least one room');
+      return;
+    }
+    const dialog = this.dialog();
+    const content = element('div', 'dialog-content');
+    content.append(element('p', 'eyebrow', 'Room details'), element('h2', 'dialog-title', 'Delete room?'));
+    content.append(element('p', 'measurement-target', `"${room.name}" and its walls, measurements, photos and notes will be removed.`));
+    const actions = element('div', 'dialog-actions');
+    actions.append(button('Cancel', 'button quiet', () => dialog.close()));
+    actions.append(button('Delete room', 'button danger', () => {
+      if (this.deleteRoom(project, room.id)) dialog.close();
+    }));
+    content.append(actions);
+    dialog.replaceChildren(content);
+    this.openDialog(dialog);
+  }
+
+  private deleteRoom(project: Project, roomId: string): boolean {
+    const rooms = project.buildings.flatMap((building) => building.floors.flatMap((floor) => floor.rooms));
+    if (rooms.length <= 1) return false;
+    const next = rooms[(rooms.findIndex((room) => room.id === roomId) + 1) % rooms.length];
+    for (const building of project.buildings) {
+      for (const floor of building.floors) floor.rooms = floor.rooms.filter((room) => room.id !== roomId);
+    }
+    this.activeRoomId = next.id;
+    this.editorSelection = null;
+    project.modifiedAt = new Date().toISOString();
+    if (!this.save(project)) return false;
+    this.render();
+    return true;
+  }
+
+  private roomHeightField(project: Project, room: Room): HTMLElement {
+    const imperial = project.preferredUnits === 'imperial';
+    const factor = imperial ? 3.280839895 : 1;
+    const group = element('div', 'field');
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.inputMode = 'decimal';
+    input.value = (roomHeight(room) * factor).toFixed(imperial ? 2 : 3);
+    input.addEventListener('input', () => input.setCustomValidity(''));
+    const apply = button('Set height', 'button quiet compact', () => {
+      const meters = parseDecimalInput(input.value) / factor;
+      if (!(meters >= 0.1 && meters <= 100)) {
+        input.setCustomValidity('Enter a valid room height.');
+        input.reportValidity();
+        return;
+      }
+      room.heightMeters = meters;
+      project.modifiedAt = new Date().toISOString();
+      if (this.save(project)) this.render();
+    });
+    group.append(element('span', 'field-label', `Room height (${imperial ? 'ft' : 'm'})`), input, apply);
+    return group;
+  }
+
+  private objectsSection(project: Project, room: Room): HTMLElement {
+    const section = element('section', 'room-objects');
+    section.append(element('h3', '', 'Objects'));
+    if (!room.objects.length) section.append(element('p', 'measurements-empty', 'No objects in this room yet.'));
+    for (const object of room.objects) {
+      const row = element('div', 'room-note');
+      const dimensions = [object.widthMeters, object.depthMeters, object.heightMeters].map((value) => formatLength(value, project.preferredUnits)).join(' × ');
+      row.append(element('span', '', `${object.name} · ${dimensions}`));
+      row.append(button('Remove', 'button quiet compact', () => {
+        room.objects = room.objects.filter((candidate) => candidate.id !== object.id);
+        project.modifiedAt = new Date().toISOString();
+        if (this.save(project)) this.render();
+      }));
+      section.append(row);
+    }
+    section.append(button('Add object', 'button quiet stretch', () => this.showObjectDialog(project, room)));
+    return section;
+  }
+
+  private showObjectDialog(project: Project, room: Room): void {
+    const imperial = project.preferredUnits === 'imperial';
+    const factor = imperial ? 3.280839895 : 1;
+    const dialog = this.dialog();
+    const content = element('div', 'dialog-content');
+    content.append(element('p', 'eyebrow', room.name), element('h2', 'dialog-title', 'Add object'));
+    const field = (label: string, numeric: boolean) => {
+      const wrapper = document.createElement('label');
+      wrapper.className = 'field';
+      const input = document.createElement('input');
+      input.type = 'text';
+      if (numeric) input.inputMode = 'decimal';
+      wrapper.append(element('span', 'field-label', label), input);
+      content.append(wrapper);
+      return input;
+    };
+    const unit = imperial ? 'ft' : 'm';
+    const name = field('Name', false);
+    const width = field(`Width (${unit})`, true);
+    const depth = field(`Depth (${unit})`, true);
+    const height = field(`Height (${unit})`, true);
+    const error = element('p', 'field-error');
+    error.setAttribute('role', 'alert');
+    const actions = element('div', 'dialog-actions');
+    actions.append(button('Cancel', 'button quiet', () => dialog.close()));
+    actions.append(button('Add', 'button primary', () => {
+      const [widthMeters, depthMeters, heightMeters] = [width, depth, height].map((input) => parseDecimalInput(input.value) / factor);
+      if (!name.value.trim() || ![widthMeters, depthMeters, heightMeters].every((value) => value > 0 && value <= 1000)) {
+        error.textContent = 'Enter a name and positive width, depth and height.';
+        return;
+      }
+      room.objects.push({ id: createId(), name: name.value.trim(), widthMeters, depthMeters, heightMeters });
+      project.modifiedAt = new Date().toISOString();
+      if (this.save(project)) {
+        dialog.close();
+        this.render();
+      }
+    }));
+    content.append(error, actions);
+    dialog.replaceChildren(content);
+    this.openDialog(dialog);
   }
 
   private addFloor(project: Project): void {
