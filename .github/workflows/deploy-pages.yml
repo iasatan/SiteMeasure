@@ -41,6 +41,8 @@ jobs:
 
       - name: Build static application
         run: npm run build
+        env:
+          APP_BUILD_NUMBER: ${{ github.run_number }}
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
