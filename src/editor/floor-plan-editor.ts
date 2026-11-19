@@ -238,13 +238,7 @@ export class FloorPlanEditor {
     const wall = this.selectedWall();
     if (!wall || lengthMeters <= 0) return;
     this.beginAction();
-    const angle = Math.atan2(wall.end.yMeters - wall.start.yMeters, wall.end.xMeters - wall.start.xMeters);
-    wall.end = {
-      xMeters: wall.start.xMeters + Math.cos(angle) * lengthMeters,
-      yMeters: wall.start.yMeters + Math.sin(angle) * lengthMeters,
-    };
-    wall.lengthMeters = lengthMeters;
-    this.syncPolygonFromWalls();
+    this.resizeWall(wall, lengthMeters);
     this.commitAction();
   }
 
@@ -278,10 +272,7 @@ export class FloorPlanEditor {
     if (offsetMeters + widthMeters > wallLengthMeters + 1e-9) return false;
     this.beginAction();
     if (Math.abs(wallLengthMeters - distanceBetween(wall.start, wall.end)) > 1e-9) {
-      const angle = Math.atan2(wall.end.yMeters - wall.start.yMeters, wall.end.xMeters - wall.start.xMeters);
-      wall.end = { xMeters: wall.start.xMeters + Math.cos(angle) * wallLengthMeters, yMeters: wall.start.yMeters + Math.sin(angle) * wallLengthMeters };
-      wall.lengthMeters = wallLengthMeters;
-      this.syncPolygonFromWalls();
+      this.resizeWall(wall, wallLengthMeters);
     }
     opening.offsetMeters = offsetMeters;
     opening.widthMeters = widthMeters;
@@ -614,6 +605,38 @@ export class FloorPlanEditor {
   private commitAction(): void {
     this.onChange(structuredClone(this.room), true);
     this.render();
+  }
+
+  /** Moves the wall's end point and keeps the room connected; a perpendicular next wall is translated so rectangles shrink instead of tearing. */
+  private resizeWall(wall: Wall, lengthMeters: number): void {
+    const walls = this.room.walls;
+    const oldEnd = structuredClone(wall.end);
+    const angle = Math.atan2(wall.end.yMeters - wall.start.yMeters, wall.end.xMeters - wall.start.xMeters);
+    const newEnd = {
+      xMeters: wall.start.xMeters + Math.cos(angle) * lengthMeters,
+      yMeters: wall.start.yMeters + Math.sin(angle) * lengthMeters,
+    };
+    const delta = { xMeters: newEnd.xMeters - oldEnd.xMeters, yMeters: newEnd.yMeters - oldEnd.yMeters };
+    wall.end = newEnd;
+    wall.lengthMeters = lengthMeters;
+    const index = walls.indexOf(wall);
+    const next = walls[(index + 1) % walls.length];
+    const following = walls[(index + 2) % walls.length];
+    const closed = walls.length >= 3 && walls.every((candidate, i) => distanceBetween(i === index ? oldEnd : candidate.end, walls[(i + 1) % walls.length].start) < 0.05);
+    if (closed && next !== wall) {
+      const cross = (a: Wall) => (a.end.xMeters - a.start.xMeters) * (wall.end.yMeters - wall.start.yMeters) - (a.end.yMeters - a.start.yMeters) * (wall.end.xMeters - wall.start.xMeters);
+      const dot = (a: Wall, b: Wall) => (a.end.xMeters - a.start.xMeters) * (b.end.xMeters - b.start.xMeters) + (a.end.yMeters - a.start.yMeters) * (b.end.yMeters - b.start.yMeters);
+      const perpendicular = Math.abs(dot(next, wall)) < 1e-6 * Math.max(1, distanceBetween(next.start, next.end) * distanceBetween(wall.start, wall.end));
+      const parallel = following !== wall && following !== next && Math.abs(cross(following)) < 1e-6 * Math.max(1, distanceBetween(following.start, following.end) * distanceBetween(wall.start, wall.end));
+      next.start = structuredClone(newEnd);
+      if (perpendicular && parallel) {
+        next.end = { xMeters: next.end.xMeters + delta.xMeters, yMeters: next.end.yMeters + delta.yMeters };
+        following.start = structuredClone(next.end);
+      }
+      delete next.lengthMeters;
+      if (perpendicular && parallel) delete following.lengthMeters;
+    }
+    this.syncPolygonFromWalls();
   }
 
   private syncPolygonFromWalls(): void {
