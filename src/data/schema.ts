@@ -93,7 +93,38 @@ function validateRoom(value: unknown, path: string): void {
     if (measurement.deviceName !== undefined) expectString(measurement.deviceName, `${path}.measurements[${index}].deviceName`, false);
     if (measurement.simulated !== undefined && typeof measurement.simulated !== 'boolean') throw new ProjectValidationError(`${path}.measurements[${index}].simulated is invalid.`);
   });
-  for (const collection of ['openings', 'objects', 'photos']) expectArray(room[collection], `${path}.${collection}`);
+  expectArray(room.photos, `${path}.photos`).forEach((photoValue, index) => {
+    const photoPath = `${path}.photos[${index}]`;
+    const photo = expectRecord(photoValue, photoPath);
+    expectString(photo.id, `${photoPath}.id`, false);
+    expectString(photo.title, `${photoPath}.title`);
+    expectString(photo.notes, `${photoPath}.notes`);
+    if (typeof photo.dataUrl !== 'string' || photo.dataUrl.length > 8 * 1024 * 1024) throw new ProjectValidationError(`${photoPath}.dataUrl is invalid or too large.`);
+    if (!['image/jpeg', 'image/webp'].includes(String(photo.mimeType))) throw new ProjectValidationError(`${photoPath}.mimeType is invalid.`);
+    const expectedPrefix = `data:${String(photo.mimeType)};base64,`;
+    if (!String(photo.dataUrl).startsWith(expectedPrefix)) throw new ProjectValidationError(`${photoPath}.dataUrl does not match its MIME type.`);
+    expectFinite(photo.width, `${photoPath}.width`, 1, 10_000);
+    expectFinite(photo.height, `${photoPath}.height`, 1, 10_000);
+    expectFinite(photo.sizeBytes, `${photoPath}.sizeBytes`, 1, 10 * 1024 * 1024);
+    expectIsoDate(photo.capturedAt, `${photoPath}.capturedAt`);
+    expectArray(photo.annotations, `${photoPath}.annotations`).forEach((annotationValue, annotationIndex) => {
+      const annotationPath = `${photoPath}.annotations[${annotationIndex}]`;
+      const annotation = expectRecord(annotationValue, annotationPath);
+      expectString(annotation.id, `${annotationPath}.id`, false);
+      if (!['arrow', 'rectangle', 'circle', 'text'].includes(String(annotation.type))) throw new ProjectValidationError(`${annotationPath}.type is invalid.`);
+      expectFinite(annotation.x, `${annotationPath}.x`, 0, 1);
+      expectFinite(annotation.y, `${annotationPath}.y`, 0, 1);
+      for (const coordinate of ['endX', 'endY'] as const) {
+        if (annotation[coordinate] !== undefined) expectFinite(annotation[coordinate], `${annotationPath}.${coordinate}`, 0, 1);
+      }
+      for (const dimension of ['width', 'height'] as const) {
+        if (annotation[dimension] !== undefined) expectFinite(annotation[dimension], `${annotationPath}.${dimension}`, 0, 1);
+      }
+      if (annotation.text !== undefined) expectString(annotation.text, `${annotationPath}.text`);
+      if (typeof annotation.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(annotation.color)) throw new ProjectValidationError(`${annotationPath}.color is invalid.`);
+    });
+  });
+  for (const collection of ['openings', 'objects']) expectArray(room[collection], `${path}.${collection}`);
   expectArray(room.notes, `${path}.notes`).forEach((note, index) => expectString(note, `${path}.notes[${index}]`));
 }
 

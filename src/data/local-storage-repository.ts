@@ -222,6 +222,10 @@ function remapRoomIds(room: Project['buildings'][number]['floors'][number]['room
     measurement.id = mappedId(idMap, measurement.id);
     measurement.targetId = mappedId(idMap, measurement.targetId);
   });
+  room.photos.forEach((photo) => {
+    photo.id = mappedId(idMap, photo.id);
+    photo.annotations.forEach((annotation) => { annotation.id = mappedId(idMap, annotation.id); });
+  });
 }
 
 function mappedId(idMap: Map<string, string>, sourceId: string): string {

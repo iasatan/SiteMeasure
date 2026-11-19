@@ -1,6 +1,6 @@
 import { copyImportedProject, projectFilename, readProjectFile, serializeProject } from './data/project-files';
 import { LocalStorageProjectRepository, type RepositoryWarning } from './data/local-storage-repository';
-import { createId, createProject, createRoom, type Project, type ProjectSummary, type Room } from './domain/models';
+import { createId, createProject, createRoom, type PhotoAnnotation, type Project, type ProjectPhoto, type ProjectSummary, type Room } from './domain/models';
 import { FloorPlanEditor, type EditorSelection } from './editor/floor-plan-editor';
 import { distanceBetween, formatLength, openingArea, polygonIssues, roomArea, roomVolume, wallArea } from './geometry';
 import { BoschLaserMeasureAdapter } from './bluetooth/bosch-laser-measure-adapter';
@@ -8,6 +8,9 @@ import { FakeLaserMeasureAdapter } from './bluetooth/fake-laser-measure-adapter'
 import { MeasurementCapture } from './bluetooth/measurement-capture';
 import { selectBluetoothProvider } from './bluetooth/providers/select-bluetooth-provider';
 import type { BluetoothConnectionState, LaserMeasureAdapter } from './bluetooth/types';
+import { normalizedPoint, renderPhotoAnnotations } from './photos/photo-annotations';
+import { processPhoto } from './photos/photo-processing';
+import { floorPlanSvg, measurementsCsv, printableReport, svgToPng } from './reports/project-exports';
 
 type PrimaryView = 'projects' | 'plan' | 'measure' | 'photos' | 'more';
 
@@ -85,6 +88,8 @@ export class SiteMeasureApp {
       </div>
       <dialog class="app-dialog" aria-labelledby="dialog-title"></dialog>
       <input class="visually-hidden" type="file" accept=".sitemeasure.json,application/json" data-import-input />
+      <input class="visually-hidden" type="file" accept="image/*" data-photo-library />
+      <input class="visually-hidden" type="file" accept="image/*" capture="environment" data-photo-camera />
       <div class="toast" role="status" aria-live="polite" hidden></div>
     `;
 
@@ -94,6 +99,11 @@ export class SiteMeasureApp {
     this.root.querySelector<HTMLInputElement>('[data-import-input]')?.addEventListener('change', (event) => {
       void this.handleImport((event.currentTarget as HTMLInputElement).files?.[0]);
     });
+    for (const input of this.root.querySelectorAll<HTMLInputElement>('[data-photo-library], [data-photo-camera]')) {
+      input.addEventListener('change', () => {
+        void this.handlePhoto(input.files?.[0], input);
+      });
+    }
     this.renderNavigation();
   }
 
@@ -135,7 +145,7 @@ export class SiteMeasureApp {
         this.renderMeasurements(main);
         break;
       case 'photos':
-        this.renderUnavailableView(main, 'Photos', 'Photos and annotations will be available in the next implementation phase.');
+        this.renderPhotos(main);
         break;
       case 'more':
         this.renderMore(main);
@@ -659,14 +669,223 @@ export class SiteMeasureApp {
     meter.value = usage.percentUsed ?? 0;
     meter.setAttribute('aria-label', 'Local storage used');
     storage.append(meter, element('p', '', `${formatBytes(usage.bytesUsed)} of approximately ${formatBytes(usage.quotaBytes ?? 0)} used`));
+    if ((usage.percentUsed ?? 0) >= 0.7) storage.append(element('p', 'storage-warning', 'Device storage is above 70%. Export projects and remove unneeded photos to avoid save failures.'));
     storage.append(element('p', 'storage-warning', 'Clearing Safari website data can delete local projects. Export important projects regularly.'));
     const actions = element('section', 'settings-section');
-    actions.append(element('h2', '', 'Project files'));
+    actions.append(element('h2', '', 'Project files and reports'));
     actions.append(button('Import project', 'button primary stretch', () => this.openImportPicker()));
     const current = this.selectedProject();
-    if (current) actions.append(button('Export open project', 'button quiet stretch', () => this.exportProject(current)));
+    if (current) {
+      const room = this.activeRoom(current);
+      actions.append(button('Export open project', 'button quiet stretch', () => this.exportProject(current)));
+      actions.append(button('Export without photos', 'button quiet stretch', () => this.exportProject(current, false)));
+      actions.append(button('Export measurements CSV', 'button quiet stretch', () => this.downloadText(measurementsCsv(current), `${safeFilename(current.name)}-measurements.csv`, 'text/csv')));
+      if (room) {
+        actions.append(button('Export room SVG', 'button quiet stretch', () => this.downloadText(floorPlanSvg(current, room), `${safeFilename(room.name)}-plan.svg`, 'image/svg+xml')));
+        actions.append(button('Export room PNG', 'button quiet stretch', () => { void this.exportRoomPng(current, room); }));
+      }
+      actions.append(button('Print project report', 'button quiet stretch', () => this.printReport(current)));
+    }
     page.append(storage, actions);
     main.append(page);
+  }
+
+  private renderPhotos(main: HTMLElement): void {
+    const project = this.selectedProject();
+    const room = project ? this.activeRoom(project) : null;
+    const page = element('section', 'page photos-page');
+    const heading = element('div', 'page-heading');
+    const identity = element('div');
+    identity.append(element('p', 'eyebrow', 'Project record'), element('h1', '', 'Photos'));
+    heading.append(identity);
+    if (project && room) {
+      heading.append(button('Add photo', 'button primary compact', () => this.showPhotoSourceDialog(project, room)));
+    }
+    page.append(heading);
+    if (!project || !room) {
+      page.append(element('p', 'measurements-empty', 'Open a project before adding site photos and room notes.'));
+      page.append(button('Browse projects', 'button primary', () => this.setView('projects')));
+      main.append(page);
+      return;
+    }
+
+    page.append(this.roomSelector(project));
+    const notes = element('section', 'room-notes');
+    notes.append(element('h2', '', `${room.name} notes`));
+    const noteInput = document.createElement('textarea');
+    noteInput.placeholder = 'Add a room note';
+    noteInput.rows = 2;
+    noteInput.setAttribute('aria-label', 'New room note');
+    const addNote = button('Add note', 'button quiet compact', () => {
+      const value = noteInput.value.trim();
+      if (!value) return;
+      room.notes.push(value);
+      project.modifiedAt = new Date().toISOString();
+      if (this.save(project)) this.render();
+    });
+    notes.append(noteInput, addNote);
+    for (const [index, note] of room.notes.entries()) {
+      const row = element('div', 'room-note');
+      row.append(element('p', '', note), button('Delete', 'button quiet compact', () => {
+        room.notes.splice(index, 1);
+        project.modifiedAt = new Date().toISOString();
+        if (this.save(project)) this.render();
+      }));
+      notes.append(row);
+    }
+    page.append(notes);
+
+    const grid = element('div', 'photo-grid');
+    if (!room.photos.length) grid.append(element('p', 'measurements-empty', 'No photos yet. Add a camera capture or select an image from your library.'));
+    room.photos.slice().sort((left, right) => right.capturedAt.localeCompare(left.capturedAt)).forEach((photo) => {
+      const card = element('button', 'photo-card');
+      card.type = 'button';
+      const image = document.createElement('img');
+      image.src = photo.dataUrl;
+      image.alt = photo.title;
+      const text = element('span', 'photo-card-copy');
+      text.append(element('strong', '', photo.title), element('small', '', `${formatBytes(photo.sizeBytes)} · ${photo.annotations.length} annotations`));
+      card.append(image, text);
+      card.addEventListener('click', () => this.showPhotoDialog(project, room, photo));
+      grid.append(card);
+    });
+    page.append(grid);
+    main.append(page);
+  }
+
+  private showPhotoSourceDialog(project: Project, room: Room): void {
+    const dialog = this.dialog();
+    const content = element('div', 'dialog-content');
+    content.append(element('p', 'eyebrow', room.name), element('h2', 'dialog-title', 'Add site photo'));
+    const actions = element('div', 'manage-actions');
+    actions.append(button('Take photo', 'button primary stretch', () => this.root.querySelector<HTMLInputElement>('[data-photo-camera]')?.click()));
+    actions.append(button('Choose from library', 'button quiet stretch', () => this.root.querySelector<HTMLInputElement>('[data-photo-library]')?.click()));
+    actions.append(button('Cancel', 'button quiet stretch', () => dialog.close()));
+    content.append(actions);
+    dialog.replaceChildren(content);
+    this.openDialog(dialog);
+    if (!project || !room) dialog.close();
+  }
+
+  private async handlePhoto(file: File | undefined, input: HTMLInputElement): Promise<void> {
+    const project = this.selectedProject();
+    const room = project ? this.activeRoom(project) : null;
+    if (!file || !project || !room) return;
+    const dialog = this.dialog();
+    const processingStatus = element('p', 'bluetooth-detail', 'Processing photo…');
+    processingStatus.dataset.photoProcessing = 'true';
+    dialog.querySelector('.dialog-content')?.append(processingStatus);
+    try {
+      const photo = await processPhoto(file);
+      this.showProcessedPhotoConfirmation(project, room, photo);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'The photo could not be processed.';
+      processingStatus.textContent = `${message} Choose another photo to try again.`;
+      this.showToast(message);
+    } finally {
+      input.value = '';
+    }
+  }
+
+  private showProcessedPhotoConfirmation(project: Project, room: Room, photo: ProjectPhoto): void {
+    const dialog = this.dialog();
+    const content = element('div', 'dialog-content photo-confirmation');
+    content.append(element('p', 'eyebrow', 'Photo processed'), element('h2', 'dialog-title', 'Review site photo'));
+    const image = document.createElement('img');
+    image.src = photo.dataUrl;
+    image.alt = photo.title;
+    content.append(image, element('p', 'photo-result-size', `${photo.width} × ${photo.height} px · approximately ${formatBytes(photo.sizeBytes)}`));
+    const title = document.createElement('input');
+    title.value = photo.title;
+    title.setAttribute('aria-label', 'Photo title');
+    const actions = element('div', 'dialog-actions');
+    actions.append(button('Cancel', 'button quiet', () => dialog.close()));
+    actions.append(button('Save photo', 'button primary', () => {
+      photo.title = title.value.trim() || 'Site photo';
+      room.photos.push(photo);
+      project.modifiedAt = new Date().toISOString();
+      if (this.save(project)) {
+        dialog.close();
+        this.showToast(`Photo saved · ${formatBytes(photo.sizeBytes)}`);
+        this.render();
+      }
+    }));
+    content.append(title, actions);
+    dialog.replaceChildren(content);
+    this.openDialog(dialog);
+  }
+
+  private showPhotoDialog(project: Project, room: Room, photo: ProjectPhoto): void {
+    const dialog = this.dialog();
+    const content = element('div', 'dialog-content photo-editor');
+    content.append(element('p', 'eyebrow', 'Photo annotation'), element('h2', 'dialog-title', photo.title));
+    const titleField = document.createElement('input');
+    titleField.value = photo.title;
+    titleField.setAttribute('aria-label', 'Photo title');
+    const notes = document.createElement('textarea');
+    notes.value = photo.notes;
+    notes.rows = 3;
+    notes.placeholder = 'Photo notes';
+    notes.setAttribute('aria-label', 'Photo notes');
+    const textInput = document.createElement('input');
+    textInput.placeholder = 'Annotation text';
+    textInput.setAttribute('aria-label', 'Annotation text');
+    const stage = element('div', 'photo-stage');
+    const image = document.createElement('img');
+    image.src = photo.dataUrl;
+    image.alt = photo.title;
+    image.draggable = false;
+    stage.append(image);
+    let tool: PhotoAnnotation['type'] = 'arrow';
+    const updateAnnotations = () => {
+      const rendered = renderPhotoAnnotations(image, photo.annotations);
+      const current = stage.querySelector('svg');
+      if (current) current.replaceWith(rendered);
+      else stage.append(rendered);
+    };
+    image.addEventListener('load', () => {
+      stage.append(renderPhotoAnnotations(image, photo.annotations));
+    });
+    let start: { x: number; y: number } | null = null;
+    stage.addEventListener('pointerdown', (event) => {
+      start = normalizedPoint(image, event.clientX, event.clientY);
+      stage.setPointerCapture(event.pointerId);
+    });
+    stage.addEventListener('pointerup', (event) => {
+      if (!start) return;
+      const end = normalizedPoint(image, event.clientX, event.clientY);
+      if (tool === 'text') {
+        const text = textInput.value.trim();
+        if (text) photo.annotations.push({ id: createId(), type: 'text', x: end.x, y: end.y, text, color: '#e85d3f' });
+      } else {
+        photo.annotations.push({ id: createId(), type: tool, x: start.x, y: start.y, endX: end.x, endY: end.y, color: '#e85d3f' });
+      }
+      start = null;
+      updateAnnotations();
+    });
+    const tools = element('div', 'annotation-tools');
+    for (const annotationTool of ['arrow', 'rectangle', 'circle', 'text'] as const) {
+      tools.append(button(annotationTool[0].toUpperCase() + annotationTool.slice(1), 'button quiet compact', () => {
+        tool = annotationTool;
+        tools.querySelectorAll('button').forEach((item) => item.classList.toggle('is-active', item.textContent?.toLowerCase() === tool));
+      }));
+    }
+    tools.append(button('Undo annotation', 'button quiet compact', () => { photo.annotations.pop(); updateAnnotations(); }));
+    const actions = element('div', 'dialog-actions');
+    actions.append(button('Delete photo', 'button danger', () => {
+      room.photos = room.photos.filter((candidate) => candidate.id !== photo.id);
+      project.modifiedAt = new Date().toISOString();
+      if (this.save(project)) { dialog.close(); this.render(); }
+    }));
+    actions.append(button('Save', 'button primary', () => {
+      photo.title = titleField.value.trim() || 'Site photo';
+      photo.notes = notes.value.trim();
+      project.modifiedAt = new Date().toISOString();
+      if (this.save(project)) { dialog.close(); this.render(); }
+    }));
+    content.append(stage, tools, textInput, titleField, notes, actions);
+    dialog.replaceChildren(content);
+    this.openDialog(dialog);
   }
 
   private renderUnavailableView(main: HTMLElement, title: string, message: string): void {
@@ -818,15 +1037,49 @@ export class SiteMeasureApp {
     this.root.querySelector<HTMLInputElement>('[data-import-input]')?.click();
   }
 
-  private exportProject(project: Project): void {
-    const blob = new Blob([serializeProject(project)], { type: 'application/json' });
+  private exportProject(project: Project, includePhotos = true): void {
+    const exported = includePhotos ? project : structuredClone(project);
+    if (!includePhotos) exported.buildings.forEach((building) => building.floors.forEach((floor) => floor.rooms.forEach((room) => { room.photos = []; })));
+    const blob = new Blob([serializeProject(exported)], { type: 'application/json' });
+    this.downloadBlob(blob, projectFilename(exported));
+    this.showToast(includePhotos ? `${project.name} exported` : `${project.name} exported without photos`);
+  }
+
+  private async exportRoomPng(project: Project, room: Room): Promise<void> {
+    try {
+      const blob = await svgToPng(floorPlanSvg(project, room));
+      this.downloadBlob(blob, `${safeFilename(room.name)}-plan.png`);
+    } catch (error) {
+      this.showToast(error instanceof Error ? error.message : 'The PNG could not be exported.');
+    }
+  }
+
+  private printReport(project: Project): void {
+    const reportUrl = URL.createObjectURL(new Blob([printableReport(project)], { type: 'text/html;charset=utf-8' }));
+    const printWindow = window.open(reportUrl, '_blank');
+    if (!printWindow) {
+      URL.revokeObjectURL(reportUrl);
+      this.showToast('Allow pop-ups to open the printable report.');
+      return;
+    }
+    printWindow.opener = null;
+    printWindow.addEventListener('load', () => {
+      printWindow.print();
+      URL.revokeObjectURL(reportUrl);
+    }, { once: true });
+  }
+
+  private downloadText(text: string, filename: string, mimeType: string): void {
+    this.downloadBlob(new Blob([text], { type: `${mimeType};charset=utf-8` }), filename);
+  }
+
+  private downloadBlob(blob: Blob, filename: string): void {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = projectFilename(project);
+    link.download = filename;
     link.click();
     URL.revokeObjectURL(url);
-    this.showToast(`${project.name} exported`);
   }
 
   private openProject(projectId: string): void {
@@ -969,6 +1222,10 @@ function formatDate(value: string): string {
 
 function formatTime(value: string): string {
   return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(new Date(value));
+}
+
+function safeFilename(value: string): string {
+  return value.normalize('NFKD').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'project';
 }
 
 function formatBytes(bytes: number): string {

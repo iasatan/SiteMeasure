@@ -43,6 +43,32 @@ export interface Measurement {
   simulated?: boolean;
 }
 
+export interface PhotoAnnotation {
+  id: string;
+  type: 'arrow' | 'rectangle' | 'circle' | 'text';
+  x: number;
+  y: number;
+  endX?: number;
+  endY?: number;
+  width?: number;
+  height?: number;
+  text?: string;
+  color: string;
+}
+
+export interface ProjectPhoto {
+  id: string;
+  title: string;
+  notes: string;
+  dataUrl: string;
+  mimeType: 'image/jpeg' | 'image/webp';
+  width: number;
+  height: number;
+  sizeBytes: number;
+  capturedAt: string;
+  annotations: PhotoAnnotation[];
+}
+
 export interface Room {
   id: string;
   name: string;
@@ -53,7 +79,7 @@ export interface Room {
   openings: never[];
   objects: never[];
   measurements: Measurement[];
-  photos: never[];
+  photos: ProjectPhoto[];
   notes: string[];
 }
 

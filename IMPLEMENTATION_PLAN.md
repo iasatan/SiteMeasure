@@ -30,7 +30,12 @@
 
 ## Phase 4: Photos and reports
 
-Photo processing and annotation, notes, CSV, SVG/PNG, and printable reports.
+- [x] Decode, orientation-correct, resize, and compress camera/library photos before local saving.
+- [x] Show processed dimensions and approximate size, warn at high localStorage usage, and support photo-free project export.
+- [x] Add photo titles, notes, arrows, rectangles, circles, text annotations, and deletion.
+- [x] Add room notes and autosave them through the repository layer.
+- [x] Export measurements CSV, active-room SVG/PNG, and printable HTML reports with photos and annotations.
+- [x] Validate photo and annotation payloads and remap their IDs during project copying.
 
 ## Phase 5: PWA and completion
 
@@ -47,3 +52,7 @@ Phase 2 is complete as an executable editor slice. It includes building/floor/ro
 ## Phase 3 Completion Notes
 
 Phase 3 is complete as an executable capture slice. It includes provider selection, extension-required handling on iOS Safari, isolated native and iOSWebBLE access, a fail-closed Bosch profile registry and adapter, simulated devices, connection states, confirmation-first measurement application, retry/cancel controls, and rapid capture queues with timestamps and sequence numbers. Real Bosch connections remain disabled until a device profile contains verified identifiers, UUIDs, and packet parsing; no protocol values were guessed.
+
+## Phase 4 Completion Notes
+
+Phase 4 is complete as an executable documentation slice. Photos are decoded and compressed to a 1600px maximum dimension before explicit size confirmation and saving. The Photos view supports camera/library capture, room notes, titles, photo notes, arrows, rectangles, circles, text annotations, and deletion. More exports validated measurement CSV, standalone room SVG and PNG, printable HTML reports with photos and annotations, full project JSON, and photo-free project JSON.
