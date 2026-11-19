@@ -22,7 +22,11 @@
 
 ## Phase 3: Bluetooth
 
-Provider selection, iOSWebBLE isolation, native Bluetooth, validated Bosch profiles, fake devices, confirmation, and rapid capture.
+- [x] Add isolated native Web Bluetooth, iOSWebBLE, and unsupported providers with deterministic selection.
+- [x] Add a fail-closed Bosch adapter and validated device-profile boundary with explicit TODO protocol values.
+- [x] Add a simulated laser adapter that marks generated values as simulated.
+- [x] Add confirmation-first capture, retry/cancel controls, rapid queues, timestamps, sequence numbers, and explicit target assignment.
+- [x] Persist confirmed Bluetooth captures and simulated status without requiring Bluetooth for manual entry or project editing.
 
 ## Phase 4: Photos and reports
 
@@ -40,4 +44,6 @@ Phase 1 is complete as an executable vertical slice. It includes a 320px-compati
 
 Phase 2 is complete as an executable editor slice. It includes building/floor/room navigation, wall and room drawing, endpoint and wall movement, doors and windows, manual comma-decimal measurements, live calculations, pan/zoom, undo/redo, split/join, copy/paste, locking, responsive inspectors, and validated local persistence.
 
-Phase 3 remains intentionally blocked on verified Bosch profile values for any real device protocol integration. The Bluetooth provider, fake adapter, and confirmation pipeline can proceed without guessed UUIDs or packet formats.
+## Phase 3 Completion Notes
+
+Phase 3 is complete as an executable capture slice. It includes provider selection, extension-required handling on iOS Safari, isolated native and iOSWebBLE access, a fail-closed Bosch profile registry and adapter, simulated devices, connection states, confirmation-first measurement application, retry/cancel controls, and rapid capture queues with timestamps and sequence numbers. Real Bosch connections remain disabled until a device profile contains verified identifiers, UUIDs, and packet parsing; no protocol values were guessed.

@@ -3,6 +3,11 @@ import { LocalStorageProjectRepository, type RepositoryWarning } from './data/lo
 import { createId, createProject, createRoom, type Project, type ProjectSummary, type Room } from './domain/models';
 import { FloorPlanEditor, type EditorSelection } from './editor/floor-plan-editor';
 import { distanceBetween, formatLength, openingArea, polygonIssues, roomArea, roomVolume, wallArea } from './geometry';
+import { BoschLaserMeasureAdapter } from './bluetooth/bosch-laser-measure-adapter';
+import { FakeLaserMeasureAdapter } from './bluetooth/fake-laser-measure-adapter';
+import { MeasurementCapture } from './bluetooth/measurement-capture';
+import { selectBluetoothProvider } from './bluetooth/providers/select-bluetooth-provider';
+import type { BluetoothConnectionState, LaserMeasureAdapter } from './bluetooth/types';
 
 type PrimaryView = 'projects' | 'plan' | 'measure' | 'photos' | 'more';
 
@@ -24,6 +29,12 @@ const navItems: Array<{ id: PrimaryView; label: string }> = [
 export class SiteMeasureApp {
   private readonly root: HTMLElement;
   private readonly repository: LocalStorageProjectRepository;
+  private readonly bluetoothProvider = selectBluetoothProvider();
+  private readonly bluetoothCapture = new MeasurementCapture();
+  private bluetoothAdapter: LaserMeasureAdapter | null = null;
+  private bluetoothState: BluetoothConnectionState = 'ready';
+  private bluetoothDetail = '';
+  private measurementPanelContext: { project: Project; room: Room; wall: Project['buildings'][number]['floors'][number]['rooms'][number]['walls'][number] } | null = null;
   private view: PrimaryView = 'projects';
   private selectedProjectId: string | null = null;
   private dirty = false;
@@ -45,6 +56,9 @@ export class SiteMeasureApp {
       repositoryWarning?.(message);
       this.renderNotice();
     });
+    if (this.bluetoothProvider.id === 'unsupported') {
+      this.bluetoothState = this.bluetoothProvider.label === 'iOSWebBLE required' ? 'extension-required' : 'not-available';
+    }
 
     window.addEventListener('beforeunload', (event) => {
       if (this.dirty && this.saveState === 'error') {
@@ -298,7 +312,7 @@ export class SiteMeasureApp {
       if (wall) {
         const length = element('div', 'measurement-readout');
         length.append(element('small', '', 'Current length'), element('strong', '', formatLength(distanceBetween(wall.start, wall.end), project.preferredUnits)));
-        const editLength = button('Edit length', 'button primary stretch', () => this.showMeasurementDialog(project, room, wall));
+        const editLength = button('Measure or set length', 'button primary stretch', () => this.showMeasurementDialog(project, room, wall));
         const wallActions = element('div', 'selection-actions');
         wallActions.append(button('Door', 'button quiet', () => this.activeEditor?.addDoorToSelectedWall()));
         wallActions.append(button('Window', 'button quiet', () => this.activeEditor?.addWindowToSelectedWall()));
@@ -354,9 +368,154 @@ export class SiteMeasureApp {
       if (this.save(project)) dialog.close();
     }));
     input.addEventListener('input', () => input.setCustomValidity(''));
-    content.append(target, field, actions);
+    this.measurementPanelContext = { project, room, wall };
+    content.append(target, field, this.bluetoothPanel(project, room, wall), actions);
     dialog.replaceChildren(content);
     this.openDialog(dialog);
+  }
+
+  private bluetoothPanel(project: Project, room: Room, wall?: Project['buildings'][number]['floors'][number]['rooms'][number]['walls'][number]): HTMLElement {
+    const panel = element('section', 'bluetooth-panel');
+    panel.dataset.bluetoothPanel = 'true';
+    panel.append(element('h3', '', 'Laser measure'));
+    const target = wall ? 'Selected wall' : 'Active room';
+    panel.append(element('p', 'bluetooth-target', `Target: ${room.name} · ${target}`));
+    const stateRow = element('div', 'bluetooth-status');
+    stateRow.append(element('span', 'bluetooth-state', this.bluetoothStateLabel()), element('span', 'bluetooth-device', this.bluetoothAdapter?.deviceName || this.bluetoothProvider.label));
+    panel.append(stateRow);
+    if (this.bluetoothDetail) panel.append(element('p', 'bluetooth-detail', this.bluetoothDetail));
+    if (this.bluetoothState === 'extension-required' || this.bluetoothProvider.id === 'unsupported') {
+      panel.append(element('p', 'bluetooth-help', 'On iPhone and iPad Safari, enable iOSWebBLE. Manual measurements always remain available.'));
+    }
+
+    const captureMode = document.createElement('label');
+    captureMode.className = 'capture-mode';
+    const rapid = document.createElement('input');
+    rapid.type = 'checkbox';
+    rapid.checked = this.bluetoothCapture.mode === 'rapid';
+    rapid.addEventListener('change', () => {
+      this.bluetoothCapture.mode = rapid.checked ? 'rapid' : 'confirmation';
+      this.refreshBluetoothSurfaces();
+    });
+    captureMode.append(rapid, element('span', '', 'Rapid capture'));
+    panel.append(captureMode);
+
+    const connectionActions = element('div', 'bluetooth-actions');
+    connectionActions.append(button('Connect laser measure', 'button primary stretch', () => { void this.connectLaserMeasure(false); }));
+    connectionActions.append(button('Try simulated device', 'button quiet stretch', () => { void this.connectLaserMeasure(true); }));
+    if (this.bluetoothAdapter) {
+      connectionActions.append(button('Disconnect', 'button quiet stretch', () => { void this.disconnectLaserMeasure(); }));
+    }
+    if (this.bluetoothAdapter instanceof FakeLaserMeasureAdapter && this.bluetoothState === 'connected') {
+      connectionActions.append(button('Receive simulated value', 'button quiet stretch', () => this.bluetoothAdapter instanceof FakeLaserMeasureAdapter && this.bluetoothAdapter.emitDemoMeasurement()));
+    }
+    panel.append(connectionActions);
+
+    const captures = this.bluetoothCapture.list();
+    if (captures.length) {
+      const queue = element('div', 'capture-queue');
+      for (const capture of captures) {
+        const row = element('article', 'capture-row');
+        const readout = element('div', 'capture-readout');
+        readout.append(element('strong', '', formatLength(capture.valueMeters, project.preferredUnits)));
+        readout.append(element('span', '', `${capture.simulated ? 'SIMULATED · ' : ''}#${capture.sequence} · ${capture.deviceName}`));
+        readout.append(element('time', '', formatTime(capture.capturedAt)));
+        const actions = element('div', 'capture-row-actions');
+        actions.append(button('Apply', 'button primary compact', () => this.applyBluetoothCapture(project, room, wall, capture.id)));
+        actions.append(button('Retry', 'button quiet compact', () => {
+          this.bluetoothCapture.discard(capture.id);
+          if (this.bluetoothAdapter instanceof FakeLaserMeasureAdapter) this.bluetoothAdapter.emitDemoMeasurement();
+          else void this.connectLaserMeasure(false);
+        }));
+        actions.append(button('Cancel', 'button quiet compact', () => {
+          this.bluetoothCapture.discard(capture.id);
+          this.refreshBluetoothSurfaces();
+        }));
+        row.append(readout, actions);
+        queue.append(row);
+      }
+      panel.append(queue);
+    }
+    return panel;
+  }
+
+  private async connectLaserMeasure(simulated: boolean): Promise<void> {
+    await this.disconnectLaserMeasure(false);
+    const adapter: LaserMeasureAdapter = simulated
+      ? new FakeLaserMeasureAdapter()
+      : new BoschLaserMeasureAdapter(this.bluetoothProvider);
+    this.bluetoothAdapter = adapter;
+    try {
+      await adapter.connect(
+        (measurement) => {
+          this.bluetoothCapture.receive(measurement);
+          this.showToast(measurement.simulated ? 'Simulated measurement received' : 'Measurement received');
+          this.refreshBluetoothSurfaces();
+        },
+        (state, detail) => {
+          this.bluetoothState = state;
+          this.bluetoothDetail = detail ?? '';
+          this.refreshBluetoothSurfaces();
+        },
+      );
+    } catch {
+      this.bluetoothAdapter = adapter;
+      this.refreshBluetoothSurfaces();
+    }
+  }
+
+  private async disconnectLaserMeasure(refresh = true): Promise<void> {
+    await this.bluetoothAdapter?.disconnect();
+    this.bluetoothAdapter = null;
+    if (this.bluetoothProvider.id !== 'unsupported') this.bluetoothState = 'ready';
+    else this.bluetoothState = this.bluetoothProvider.label === 'iOSWebBLE required' ? 'extension-required' : 'not-available';
+    this.bluetoothDetail = '';
+    if (refresh) this.refreshBluetoothSurfaces();
+  }
+
+  private bluetoothStateLabel(): string {
+    const labels: Record<BluetoothConnectionState, string> = {
+      'not-available': 'Not available',
+      'extension-required': 'Extension required',
+      ready: 'Ready',
+      searching: 'Searching',
+      connecting: 'Connecting',
+      connected: 'Connected',
+      receiving: 'Receiving measurement',
+      disconnected: 'Disconnected',
+      error: 'Error',
+    };
+    return labels[this.bluetoothState];
+  }
+
+  private refreshBluetoothSurfaces(): void {
+    if (this.measurementPanelContext && this.dialog().open) {
+      const { project, room, wall } = this.measurementPanelContext;
+      this.showMeasurementDialog(project, room, wall);
+      return;
+    }
+    if (this.view === 'measure') this.render();
+  }
+
+  private applyBluetoothCapture(project: Project, room: Room, wall: Project['buildings'][number]['floors'][number]['rooms'][number]['walls'][number] | undefined, captureId: string): void {
+    const measurement = this.bluetoothCapture.confirm(captureId, room, wall ? 'wall' : 'room', wall?.id ?? room.id);
+    if (!measurement) return;
+    if (wall) {
+      const previousEnd = { ...wall.end };
+      const angle = Math.atan2(previousEnd.yMeters - wall.start.yMeters, previousEnd.xMeters - wall.start.xMeters);
+      wall.end = {
+        xMeters: wall.start.xMeters + Math.cos(angle) * measurement.valueMeters,
+        yMeters: wall.start.yMeters + Math.sin(angle) * measurement.valueMeters,
+      };
+      wall.lengthMeters = measurement.valueMeters;
+      room.points = room.points.map((point) => point.xMeters === previousEnd.xMeters && point.yMeters === previousEnd.yMeters ? { ...wall.end } : point);
+    }
+    project.modifiedAt = new Date().toISOString();
+    if (this.save(project)) {
+      if (wall && this.dialog().open) this.dialog().close();
+      this.showToast(measurement.simulated ? 'Simulated measurement applied' : 'Measurement applied');
+      this.render();
+    }
   }
 
   private addRoom(project: Project): void {
@@ -477,10 +636,15 @@ export class SiteMeasureApp {
     for (const { measurement, room } of measurements) {
       const row = element('article', 'measurement-row');
       row.append(element('strong', 'measurement-value', formatLength(measurement.valueMeters, project.preferredUnits)));
-      row.append(element('span', '', `${room.name} · ${measurement.source} · ${formatDate(measurement.capturedAt)}`));
+      row.append(element('span', '', `${room.name} · ${measurement.simulated ? 'simulated · ' : ''}${measurement.source} · ${formatDate(measurement.capturedAt)}`));
       list.append(row);
     }
-    page.append(list, button('Open plan', 'button quiet stretch', () => this.setView('plan')));
+    const active = this.activeRoom(project);
+    const selectedWall = this.editorSelection?.type === 'wall'
+      ? active?.walls.find((wall) => wall.id === this.editorSelection?.id)
+      : undefined;
+    if (active) page.append(list, this.bluetoothPanel(project, active, selectedWall), button('Open plan', 'button quiet stretch', () => this.setView('plan')));
+    else page.append(list, button('Open plan', 'button quiet stretch', () => this.setView('plan')));
     main.append(page);
   }
 

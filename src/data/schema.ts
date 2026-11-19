@@ -90,6 +90,8 @@ function validateRoom(value: unknown, path: string): void {
     if (!['manual', 'bluetooth'].includes(String(measurement.source))) throw new ProjectValidationError(`${path}.measurements[${index}].source is invalid.`);
     expectFinite(measurement.valueMeters, `${path}.measurements[${index}].valueMeters`, 0.001, 1_000_000);
     expectIsoDate(measurement.capturedAt, `${path}.measurements[${index}].capturedAt`);
+    if (measurement.deviceName !== undefined) expectString(measurement.deviceName, `${path}.measurements[${index}].deviceName`, false);
+    if (measurement.simulated !== undefined && typeof measurement.simulated !== 'boolean') throw new ProjectValidationError(`${path}.measurements[${index}].simulated is invalid.`);
   });
   for (const collection of ['openings', 'objects', 'photos']) expectArray(room[collection], `${path}.${collection}`);
   expectArray(room.notes, `${path}.notes`).forEach((note, index) => expectString(note, `${path}.notes[${index}]`));

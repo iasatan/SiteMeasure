@@ -30,7 +30,7 @@ Current export format: `*.sitemeasure.json`.
 
 ## Current scope
 
-Phases 1 and 2 include:
+Phases 1, 2, and 3 include:
 
 - iPhone-first project dashboard and iPad adaptive project workspace;
 - create, open, rename, duplicate, archive, restore, delete, and undo deletion;
@@ -41,9 +41,11 @@ Phases 1 and 2 include:
 - wall and polygon room drawing, endpoint dragging, pan, pinch zoom, fit, grid, and snapping;
 - split/join, rotate, duplicate, copy/paste, lock, delete, and undo/redo;
 - door/window placement, dimension labels, manual comma-decimal measurements, and live area/volume calculations;
+- isolated native Web Bluetooth and iOSWebBLE provider selection with manual fallback;
+- fail-closed Bosch protocol profiles, simulated capture, connection states, confirmation, and rapid capture queues;
 - static GitHub Pages deployment workflow.
 
-Bluetooth, photos, reports, backups, and the offline service worker remain later-phase work.
+Real Bosch hardware remains disabled until its device identifiers, GATT UUIDs, and packet format are verified. Manual measurements and simulated capture remain available. Photos, reports, backups, and the offline service worker are later-phase work.
 
 ## Deployment
 

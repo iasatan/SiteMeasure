@@ -280,6 +280,25 @@
   .measurement-value { font: 500 1.6rem Georgia, serif; white-space: nowrap; }
   .measurements-empty { margin: 22px 0; color: var(--muted); }
 
+  .bluetooth-panel { display: grid; gap: 12px; margin: 18px 0; padding: 16px 0; border-block: 1px solid var(--line); }
+  .bluetooth-panel h3 { margin: 0; font: 500 1.35rem Georgia, serif; }
+  .bluetooth-target, .bluetooth-detail, .bluetooth-help { color: var(--muted); font-size: 0.78rem; }
+  .bluetooth-detail { padding-left: 9px; border-left: 3px solid var(--accent); color: var(--ink); }
+  .bluetooth-help { padding: 10px; background: color-mix(in srgb, var(--warning) 10%, var(--surface)); }
+  .bluetooth-status { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .bluetooth-state { padding: 4px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--green-2); font-size: 0.68rem; font-weight: 800; text-transform: uppercase; }
+  .bluetooth-device { min-width: 0; color: var(--muted); font-size: 0.72rem; overflow-wrap: anywhere; text-align: right; }
+  .capture-mode { display: flex; align-items: center; gap: 8px; min-height: 44px; font-size: 0.8rem; font-weight: 700; }
+  .capture-mode input { width: 22px; height: 22px; accent-color: var(--accent-dark); }
+  .bluetooth-actions { display: grid; gap: 7px; }
+  .capture-queue { display: grid; gap: 8px; }
+  .capture-row { display: grid; gap: 10px; padding: 13px 0; border-top: 1px solid var(--line); }
+  .capture-readout { display: grid; gap: 4px; }
+  .capture-readout strong { font: 500 2rem Georgia, serif; }
+  .capture-readout span, .capture-readout time { color: var(--muted); font-size: 0.7rem; }
+  .capture-row-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .capture-row-actions .button { min-width: 0; padding-inline: 6px; }
+
   .project-form { display: grid; gap: 13px; }
   .field { display: grid; gap: 5px; }
   .field-label { color: var(--muted); font-size: 0.72rem; font-weight: 800; }

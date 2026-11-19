@@ -40,6 +40,7 @@ export interface Measurement {
   capturedAt: string;
   source: 'manual' | 'bluetooth';
   deviceName?: string;
+  simulated?: boolean;
 }
 
 export interface Room {
