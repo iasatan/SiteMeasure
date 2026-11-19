@@ -535,7 +535,11 @@ export class FloorPlanEditor {
   }
 
   private constrainRightAngle(point: Point, previous?: Point | null, from?: Point | null): Point {
-    if (!this.rightAngles || !previous || !from) return point;
+    if (!this.rightAngles || !from) return point;
+    if (!previous) {
+      const horizontal = Math.abs(point.xMeters - from.xMeters) >= Math.abs(point.yMeters - from.yMeters);
+      return horizontal ? { xMeters: point.xMeters, yMeters: from.yMeters } : { xMeters: from.xMeters, yMeters: point.yMeters };
+    }
     return perpendicularPoint(previous, from, point);
   }
 
@@ -546,13 +550,18 @@ export class FloorPlanEditor {
       return;
     }
     const count = this.drawingPoints.length;
-    const point = count >= 2 ? this.constrainRightAngle(raw, this.drawingPoints[count - 2], this.drawingPoints[count - 1]) : raw;
+    const point = count >= 1 ? this.constrainRightAngle(raw, this.drawingPoints[count - 2], this.drawingPoints[count - 1]) : raw;
     this.drawingPoints.push(point);
     this.render();
   }
 
   finishRoom(): void {
     if (this.drawingPoints.length < 3) return;
+    if (this.rightAngles && this.drawingPoints.length >= 4) {
+      // Make the last corner 90° too, so the closing wall is perpendicular to the previous one.
+      const points = this.drawingPoints;
+      points[points.length - 1] = perpendicularPoint(points[points.length - 3], points[points.length - 2], points[0]);
+    }
     const issues = polygonIssues(this.drawingPoints);
     if (issues.length) {
       this.summary.textContent = issues.join(' ');
