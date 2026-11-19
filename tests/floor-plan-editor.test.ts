@@ -2,15 +2,24 @@ import { describe, expect, it } from 'vitest';
 import { createRoom } from '../src/domain/models';
 import { FloorPlanEditor } from '../src/editor/floor-plan-editor';
 
-function rectangleEditor(): any {
+interface EditorInternals {
+  room: { walls: Array<{ start: { xMeters: number; yMeters: number }; end: { xMeters: number; yMeters: number } }> };
+  selection: { type: 'wall'; id: string } | null;
+  dragOrigin: { xMeters: number; yMeters: number };
+  originalRoom: unknown;
+  setWallLength(lengthMeters: number): void;
+  handleWallDrag(point: { xMeters: number; yMeters: number }): void;
+}
+
+function rectangleEditor(): EditorInternals {
   const room = createRoom();
   const points = [[0, 0], [4, 0], [4, 4], [0, 4]].map(([xMeters, yMeters]) => ({ xMeters, yMeters }));
   room.points = points;
   room.walls = points.map((start, index) => ({ id: `w${index}`, start: { ...start }, end: { ...points[(index + 1) % 4] } })) as typeof room.walls;
-  return new FloorPlanEditor({ room, units: 'metric', onChange: () => {}, onSelection: () => {}, onMeasure: () => {}, onOpening: () => {} } as never);
+  return new FloorPlanEditor({ room, units: 'metric', onChange: () => {}, onSelection: () => {}, onMeasure: () => {}, onOpening: () => {} } as never) as unknown as EditorInternals;
 }
 
-const loop = (editor: any) => editor.room.walls.map((wall: any) => [wall.start.xMeters, wall.start.yMeters, wall.end.xMeters, wall.end.yMeters].map((value: number) => Math.round(value * 1000) / 1000));
+const loop = (editor: EditorInternals) => editor.room.walls.map((wall) => [wall.start.xMeters, wall.start.yMeters, wall.end.xMeters, wall.end.yMeters].map((value) => Math.round(value * 1000) / 1000));
 
 describe('floor plan editor', () => {
   it('shrinks a rectangle when the top then bottom wall length changes', () => {
