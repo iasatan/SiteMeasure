@@ -1,5 +1,5 @@
 import { createId, type Door, type Point, type Room, type Wall, type Window } from '../domain/models';
-import { distanceBetween, formatLength, nearestPointOnSegment, polygonIssues, roomArea, snapPoint } from '../geometry';
+import { cornerAngleDegrees, distanceBetween, formatLength, nearestPointOnSegment, perpendicularPoint, polygonIssues, roomArea, setCornerAngle, snapPoint } from '../geometry';
 
 export type EditorTool = 'select' | 'wall' | 'room' | 'door' | 'window' | 'measure';
 export type EditorSelection = { type: 'wall' | 'room'; id: string } | null;
@@ -10,7 +10,10 @@ export interface FloorPlanEditorOptions {
   onChange(room: Room, completed: boolean): void;
   onSelection(selection: EditorSelection): void;
   onMeasure?(wall: Wall): void;
+  onOpening?(kind: OpeningKind, id: string): void;
 }
+
+export type OpeningKind = 'door' | 'window';
 
 interface ViewBox {
   x: number;
@@ -33,6 +36,7 @@ export class FloorPlanEditor {
   private readonly onChange: FloorPlanEditorOptions['onChange'];
   private readonly onSelection: FloorPlanEditorOptions['onSelection'];
   private readonly onMeasure: FloorPlanEditorOptions['onMeasure'];
+  private readonly onOpening: FloorPlanEditorOptions['onOpening'];
   private readonly svg: SVGSVGElement;
   private readonly controls: HTMLElement;
   private readonly summary: HTMLElement;
@@ -54,6 +58,7 @@ export class FloorPlanEditor {
   private copiedWall: Wall | null = null;
   private showGrid = true;
   private snap = true;
+  private rightAngles = true;
 
   constructor(options: FloorPlanEditorOptions) {
     this.room = structuredClone(options.room);
@@ -61,6 +66,7 @@ export class FloorPlanEditor {
     this.onChange = options.onChange;
     this.onSelection = options.onSelection;
     this.onMeasure = options.onMeasure;
+    this.onOpening = options.onOpening;
     this.element = document.createElement('div');
     this.element.className = 'floor-editor';
 
@@ -242,6 +248,56 @@ export class FloorPlanEditor {
     this.commitAction();
   }
 
+  getCornerAngle(): number | null {
+    const wall = this.selectedWall();
+    return wall ? cornerAngleDegrees(this.room.walls, this.room.walls.indexOf(wall)) : null;
+  }
+
+  setCornerAngle(degrees: number): boolean {
+    const wall = this.selectedWall();
+    if (!wall) return false;
+    const preview = structuredClone(this.room.walls);
+    if (!setCornerAngle(preview, this.room.walls.indexOf(wall), degrees)) return false;
+    this.beginAction();
+    setCornerAngle(this.room.walls, this.room.walls.indexOf(wall), degrees);
+    this.syncPolygonFromWalls();
+    this.commitAction();
+    return true;
+  }
+
+  getOpening(kind: OpeningKind, id: string): { opening: Door | Window; wall: Wall } | null {
+    const opening = (kind === 'door' ? this.room.doors : this.room.windows).find((candidate) => candidate.id === id);
+    const wall = opening ? this.room.walls.find((candidate) => candidate.id === opening.wallId) : undefined;
+    return opening && wall ? structuredClone({ opening, wall }) : null;
+  }
+
+  updateOpening(kind: OpeningKind, id: string, wallLengthMeters: number, offsetMeters: number, widthMeters: number): boolean {
+    const opening = (kind === 'door' ? this.room.doors : this.room.windows).find((candidate) => candidate.id === id);
+    const wall = opening ? this.room.walls.find((candidate) => candidate.id === opening.wallId) : undefined;
+    if (!opening || !wall || wallLengthMeters <= 0 || widthMeters <= 0 || offsetMeters < 0) return false;
+    if (offsetMeters + widthMeters > wallLengthMeters + 1e-9) return false;
+    this.beginAction();
+    if (Math.abs(wallLengthMeters - distanceBetween(wall.start, wall.end)) > 1e-9) {
+      const angle = Math.atan2(wall.end.yMeters - wall.start.yMeters, wall.end.xMeters - wall.start.xMeters);
+      wall.end = { xMeters: wall.start.xMeters + Math.cos(angle) * wallLengthMeters, yMeters: wall.start.yMeters + Math.sin(angle) * wallLengthMeters };
+      wall.lengthMeters = wallLengthMeters;
+      this.syncPolygonFromWalls();
+    }
+    opening.offsetMeters = offsetMeters;
+    opening.widthMeters = widthMeters;
+    this.commitAction();
+    return true;
+  }
+
+  getWallOpenings(): Array<{ kind: OpeningKind; opening: Door | Window }> {
+    const wall = this.selectedWall();
+    if (!wall) return [];
+    return [
+      ...this.room.doors.filter((door) => door.wallId === wall.id).map((opening) => ({ kind: 'door' as const, opening: structuredClone(opening) })),
+      ...this.room.windows.filter((window) => window.wallId === wall.id).map((opening) => ({ kind: 'window' as const, opening: structuredClone(opening) })),
+    ];
+  }
+
   addDoorToSelectedWall(widthMeters = 0.9): void {
     this.addOpening('door', widthMeters);
   }
@@ -260,6 +316,7 @@ export class FloorPlanEditor {
     if (type === 'door') this.room.doors.push(opening as Door);
     else this.room.windows.push(opening as Window);
     this.commitAction();
+    this.onOpening?.(type, opening.id);
   }
 
   private buildUtilityRow(): HTMLElement {
@@ -278,6 +335,10 @@ export class FloorPlanEditor {
         this.snap = !this.snap;
         button?.classList.toggle('is-active', this.snap);
       }, this.snap),
+      this.actionButton('90°', 'Toggle right-angle corners while drawing', (button) => {
+        this.rightAngles = !this.rightAngles;
+        button?.classList.toggle('is-active', this.rightAngles);
+      }, this.rightAngles),
     );
     return row;
   }
@@ -456,7 +517,9 @@ export class FloorPlanEditor {
   }
 
   private addWallPoint(world: Point): void {
-    const point = this.normalizedPoint(world);
+    const last = this.room.walls[this.room.walls.length - 1];
+    const chained = this.wallStart && last && distanceBetween(last.end, this.wallStart) < 1e-9 ? last : null;
+    const point = this.constrainRightAngle(this.normalizedPoint(world), chained?.start, this.wallStart);
     if (!this.wallStart) {
       this.wallStart = point;
       this.drawingPoints = [point];
@@ -471,12 +534,19 @@ export class FloorPlanEditor {
     this.commitAction();
   }
 
+  private constrainRightAngle(point: Point, previous?: Point | null, from?: Point | null): Point {
+    if (!this.rightAngles || !previous || !from) return point;
+    return perpendicularPoint(previous, from, point);
+  }
+
   private addRoomPoint(world: Point): void {
-    const point = this.normalizedPoint(world);
-    if (this.drawingPoints.length >= 3 && distanceBetween(point, this.drawingPoints[0]) < 0.25) {
+    const raw = this.normalizedPoint(world);
+    if (this.drawingPoints.length >= 3 && distanceBetween(raw, this.drawingPoints[0]) < 0.25) {
       this.finishRoom();
       return;
     }
+    const count = this.drawingPoints.length;
+    const point = count >= 2 ? this.constrainRightAngle(raw, this.drawingPoints[count - 2], this.drawingPoints[count - 1]) : raw;
     this.drawingPoints.push(point);
     this.render();
   }
