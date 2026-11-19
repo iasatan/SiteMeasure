@@ -474,8 +474,17 @@ export class FloorPlanEditor {
   }
 
   private moveWholeWall(source: Wall, wall: Wall, delta: Point): void {
-    wall.start = { xMeters: source.start.xMeters + delta.xMeters, yMeters: source.start.yMeters + delta.yMeters };
-    wall.end = { xMeters: source.end.xMeters + delta.xMeters, yMeters: source.end.yMeters + delta.yMeters };
+    const connected = (this.originalRoom?.walls ?? []).some((other) => other.id !== source.id && [source.start, source.end].some((point) => distanceBetween(other.start, point) < 0.05 || distanceBetween(other.end, point) < 0.05));
+    let move = delta;
+    if (connected) {
+      // Slide along the wall's normal so connected walls follow and the shape keeps its angles.
+      const length = distanceBetween(source.start, source.end) || 1;
+      const normal = { xMeters: -(source.end.yMeters - source.start.yMeters) / length, yMeters: (source.end.xMeters - source.start.xMeters) / length };
+      const amount = delta.xMeters * normal.xMeters + delta.yMeters * normal.yMeters;
+      move = { xMeters: normal.xMeters * amount, yMeters: normal.yMeters * amount };
+    }
+    this.moveConnectedEndpoint(source, wall, 'start', move);
+    this.moveConnectedEndpoint(source, wall, 'end', move);
   }
 
   private handlePanMove(world: Point): void {
