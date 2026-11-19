@@ -80,6 +80,7 @@ export class SiteMeasureApp {
             <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
             <span>SiteMeasure</span>
           </button>
+          <span class="app-version">v${__APP_VERSION__}</span>
           <div class="save-indicator" role="status" aria-live="polite"></div>
         </header>
         <div class="notice" role="status" aria-live="polite" hidden></div>
