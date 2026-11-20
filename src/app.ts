@@ -1,6 +1,6 @@
 import { copyImportedProject, projectFilename, readProjectFile, serializeProject } from './data/project-files';
 import { ObjectLibrary } from './data/object-library';
-import { partBounds, type ObjectDefinition } from './domain/furniture';
+import { cloneParts, partBounds, type ObjectDefinition } from './domain/furniture';
 import { ObjectsPage } from './objects/objects-page';
 import { LocalStorageProjectRepository, type RepositoryWarning } from './data/local-storage-repository';
 import { createId, createProject, createRoom, DEFAULT_DOOR_HEIGHT_METERS, DEFAULT_WINDOW_HEIGHT_METERS, type PhotoAnnotation, type Project, type ProjectPhoto, type ProjectSummary, type Room } from './domain/models';
@@ -325,7 +325,7 @@ export class SiteMeasureApp {
       heightMeters: bounds.heightMeters,
       xMeters: centerX - bounds.widthMeters / 2,
       yMeters: centerY - bounds.depthMeters / 2,
-      parts: definition.parts.map((part) => ({ ...part, id: createId() })),
+      parts: cloneParts(definition.parts),
     });
     project.modifiedAt = new Date().toISOString();
     if (this.save(project)) this.showToast(`Inserted ${definition.name} into ${room.name}. Drag it into place on the Plan page.`);

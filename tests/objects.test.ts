@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ObjectLibrary } from '../src/data/object-library';
-import { createObjectDefinition, OBJECT_PRESETS, ObjectValidationError, parseObjectFile, partBounds, serializeObjects } from '../src/domain/furniture';
+import { applyPartChange, cloneParts, createObjectDefinition, OBJECT_PRESETS, ObjectValidationError, parseObjectFile, partBounds, scaleParts, serializeObjects, validateParts } from '../src/domain/furniture';
 
 function memoryStorage(): Storage {
   const data = new Map<string, string>();
@@ -31,5 +31,38 @@ describe('object library', () => {
     expect(() => parseObjectFile('{"format":"other"}')).toThrow(ObjectValidationError);
     const library = new ObjectLibrary(memoryStorage());
     expect(library.importAll(parsed)[0].id).not.toBe(couch.id);
+  });
+});
+
+describe('templates and attachments', () => {
+  it('ships at least 100 valid templates with unique names', () => {
+    expect(OBJECT_PRESETS.length).toBeGreaterThanOrEqual(100);
+    expect(new Set(OBJECT_PRESETS.map((preset) => preset.label)).size).toBe(OBJECT_PRESETS.length);
+    for (const preset of OBJECT_PRESETS) expect(() => validateParts(preset.build()), preset.label).not.toThrow();
+  });
+
+  it('keeps legs attached when the table top is resized or moved', () => {
+    const parts = OBJECT_PRESETS.find((preset) => preset.label === 'Table')!.build();
+    const top = parts[0];
+    applyPartChange(parts, top.id, { widthMeters: 2.4, depthMeters: 1.2 });
+    const bounds = partBounds(parts);
+    expect(bounds.widthMeters).toBeCloseTo(2.4);
+    for (const leg of parts.slice(1)) {
+      expect(leg.yMeters + leg.heightMeters / 2).toBeCloseTo(top.yMeters - top.heightMeters / 2);
+      expect(Math.abs(leg.xMeters) + leg.widthMeters / 2).toBeLessThanOrEqual(1.2 + 1e-9);
+    }
+    applyPartChange(parts, top.id, { yMeters: top.yMeters + 0.3 });
+    expect(parts[1].yMeters + parts[1].heightMeters / 2).toBeCloseTo(top.yMeters - top.heightMeters / 2);
+  });
+
+  it('scales a whole object and preserves attachments through cloning', () => {
+    const parts = OBJECT_PRESETS[0].build();
+    scaleParts(parts, { widthMeters: 3, heightMeters: 1.2 });
+    const bounds = partBounds(parts);
+    expect(bounds.widthMeters).toBeCloseTo(3);
+    expect(bounds.heightMeters).toBeCloseTo(1.2);
+    const copy = cloneParts(parts);
+    expect(copy[1].parentId).toBe(copy[0].id);
+    expect(copy[0].id).not.toBe(parts[0].id);
   });
 });

@@ -1,6 +1,9 @@
 import { ObjectLibrary } from '../data/object-library';
 import {
+  applyPartChange,
   createObjectDefinition,
+  descendantIds,
+  scaleParts,
   createPart,
   objectFilename,
   OBJECT_PRESETS,
@@ -126,7 +129,17 @@ export class ObjectsPage {
     const presetLabel = el('label', 'field');
     const preset = document.createElement('select');
     preset.append(new Option('Start from a template…', ''));
-    OBJECT_PRESETS.forEach((item, index) => preset.append(new Option(item.label, String(index))));
+    const groups = new Map<string, HTMLOptGroupElement>();
+    OBJECT_PRESETS.forEach((item, index) => {
+      let group = groups.get(item.category);
+      if (!group) {
+        group = document.createElement('optgroup');
+        group.label = item.category;
+        groups.set(item.category, group);
+      }
+      group.append(new Option(item.label, String(index)));
+    });
+    [...groups.values()].sort((a, b) => a.label.localeCompare(b.label)).forEach((group) => preset.append(group));
     preset.addEventListener('change', () => {
       const chosen = OBJECT_PRESETS[Number(preset.value)];
       if (!chosen) return;
@@ -137,14 +150,30 @@ export class ObjectsPage {
     });
     presetLabel.append(el('span', 'field-label', 'Template'), preset);
 
-    const dims = el('p', 'object-dimensions');
+    const dims = el('div', 'object-part-fields');
+    const bounds = partBounds(this.draft.parts);
+    for (const [label, key, value] of [['Overall width (m)', 'widthMeters', bounds.widthMeters], ['Overall height (m)', 'heightMeters', bounds.heightMeters], ['Overall depth (m)', 'depthMeters', bounds.depthMeters]] as const) {
+      const wrapper = el('label', 'field');
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.step = '0.05';
+      input.min = '0.01';
+      input.value = String(round(value));
+      input.addEventListener('change', () => {
+        const next = Number(input.value);
+        if (Number.isFinite(next) && next >= 0.01 && next <= 100) scaleParts(this.draft.parts, { [key]: next });
+        this.rerender();
+      });
+      wrapper.append(el('span', 'field-label', label), input);
+      dims.append(wrapper);
+    }
     const updateDims = () => {
-      const bounds = partBounds(this.draft.parts);
-      dims.textContent = `Overall: ${bounds.widthMeters.toFixed(2)} W × ${bounds.depthMeters.toFixed(2)} D × ${bounds.heightMeters.toFixed(2)} H m`;
+      const current = partBounds(this.draft.parts);
+      const inputs = dims.querySelectorAll('input');
+      [current.widthMeters, current.heightMeters, current.depthMeters].forEach((value, index) => { inputs[index].value = String(round(value)); });
     };
-    updateDims();
 
-    section.append(nameLabel, presetLabel, this.previewHost, dims, this.partsEditor(updateDims));
+    section.append(nameLabel, presetLabel, this.previewHost, dims, el('p', 'field-hint', 'Changing the overall size scales every part, so attached parts stay together.'), this.partsEditor(updateDims));
 
     const error = el('p', this.message.startsWith('Saved') ? 'field-hint' : 'field-error', this.message);
     error.setAttribute('role', 'alert');
@@ -211,12 +240,27 @@ export class ObjectsPage {
           input.value = String(round(selected[field.key]));
           return;
         }
-        selected[field.key] = value;
+        applyPartChange(this.draft.parts, selected.id, { [field.key]: value });
         refresh();
       });
       label.append(el('span', 'field-label', field.label), input);
       grid.append(label);
     }
+
+    const attachLabel = el('label', 'field');
+    const attach = document.createElement('select');
+    attach.append(new Option('Nothing (free)', ''));
+    const blocked = descendantIds(this.draft.parts, selected.id);
+    this.draft.parts.forEach((part, index) => {
+      if (part.id !== selected.id && !blocked.has(part.id)) attach.append(new Option(`${index + 1}. ${part.shape === 'box' ? 'Box' : 'Cylinder'}`, part.id));
+    });
+    attach.value = selected.parentId ?? '';
+    attach.addEventListener('change', () => {
+      if (attach.value) selected.parentId = attach.value;
+      else delete selected.parentId;
+    });
+    attachLabel.append(el('span', 'field-label', 'Sticks to'), attach);
+    grid.append(attachLabel);
 
     const colorLabel = el('label', 'field');
     const color = document.createElement('input');
@@ -246,6 +290,11 @@ export class ObjectsPage {
           return;
         }
         this.draft.parts = this.draft.parts.filter((part) => part.id !== selected.id);
+        for (const part of this.draft.parts) {
+          if (part.parentId !== selected.id) continue;
+          if (selected.parentId !== undefined) part.parentId = selected.parentId;
+          else delete part.parentId;
+        }
         this.selectedPartId = this.draft.parts[0].id;
         this.rerender();
       }),
