@@ -1,3 +1,4 @@
+import { validateParts } from '../domain/furniture';
 import { SCHEMA_VERSION, type Project, type ProjectStatus, type Unit } from '../domain/models';
 
 type JsonRecord = Record<string, unknown>;
@@ -134,6 +135,13 @@ function validateRoom(value: unknown, path: string): void {
     expectString(object.name, `${path}.objects[${index}].name`, false);
     for (const key of ['widthMeters', 'depthMeters', 'heightMeters']) expectFinite(object[key], `${path}.objects[${index}].${key}`, 0.001, 1000);
     for (const key of ['xMeters', 'yMeters']) if (object[key] !== undefined) expectFinite(object[key], `${path}.objects[${index}].${key}`, -100000, 100000);
+    if (object.parts !== undefined) {
+      try {
+        validateParts(object.parts, `${path}.objects[${index}].parts`);
+      } catch (error) {
+        throw new ProjectValidationError(error instanceof Error ? error.message : `${path}.objects[${index}].parts is invalid.`);
+      }
+    }
   });
   expectArray(room.notes, `${path}.notes`).forEach((note, index) => expectString(note, `${path}.notes[${index}]`));
 }

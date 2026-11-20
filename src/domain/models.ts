@@ -1,3 +1,5 @@
+import type { ObjectPart } from './furniture';
+
 export const SCHEMA_VERSION = 1 as const;
 export const APPLICATION_VERSION = '0.1.0';
 
@@ -48,6 +50,8 @@ export interface RoomObject {
   heightMeters: number;
   xMeters?: number;
   yMeters?: number;
+  /** 3D model copied from the object library when inserted. */
+  parts?: ObjectPart[];
 }
 
 export interface Measurement {

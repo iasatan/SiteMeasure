@@ -1,0 +1,325 @@
+import { ObjectLibrary } from '../data/object-library';
+import {
+  createObjectDefinition,
+  createPart,
+  objectFilename,
+  OBJECT_PRESETS,
+  MAX_PARTS,
+  ObjectValidationError,
+  parseObjectFile,
+  partBounds,
+  serializeObjects,
+  type ObjectDefinition,
+  type ObjectPart,
+} from '../domain/furniture';
+import { createId } from '../domain/models';
+import { createObjectPreview, type ObjectPreview } from './object-preview';
+
+export interface ObjectsPageHost {
+  /** Describes where "Insert" will place objects, or null when no room is open. */
+  insertTarget(): string | null;
+  insert(definition: ObjectDefinition): void;
+  download(text: string, filename: string, mimeType: string): void;
+  toast(message: string): void;
+}
+
+type DimensionKey = 'xMeters' | 'yMeters' | 'zMeters' | 'widthMeters' | 'heightMeters' | 'depthMeters';
+
+const DIMENSION_FIELDS: Array<{ key: DimensionKey; label: string; size: boolean }> = [
+  { key: 'widthMeters', label: 'Width (m)', size: true },
+  { key: 'heightMeters', label: 'Height (m)', size: true },
+  { key: 'depthMeters', label: 'Depth (m)', size: true },
+  { key: 'xMeters', label: 'X (m)', size: false },
+  { key: 'yMeters', label: 'Y up (m)', size: false },
+  { key: 'zMeters', label: 'Z (m)', size: false },
+];
+
+export class ObjectsPage {
+  private draft: ObjectDefinition = createObjectDefinition('New object', OBJECT_PRESETS[0].build());
+  private selectedPartId: string | null = this.draft.parts[0]?.id ?? null;
+  private message = '';
+  private readonly previewHost = document.createElement('div');
+  private preview: ObjectPreview | null | undefined;
+  private container: HTMLElement | null = null;
+
+  constructor(private readonly library: ObjectLibrary, private readonly host: ObjectsPageHost) {
+    this.previewHost.className = 'object-preview';
+  }
+
+  render(main: HTMLElement): void {
+    this.container = main;
+    const page = el('section', 'page objects-page');
+    const heading = el('div', 'page-heading');
+    const title = el('div');
+    title.append(el('p', 'eyebrow', 'Furniture and fixtures'), el('h1', '', 'Objects'));
+    const tools = el('div', 'project-tools');
+    tools.append(
+      btn('New', 'button quiet compact', () => this.startNew()),
+      btn('Import', 'button quiet compact', () => this.openImport()),
+    );
+    heading.append(title, tools);
+    page.append(heading, this.libraryList(), this.editor());
+    main.append(page);
+    this.preview ??= createObjectPreview(this.previewHost);
+    if (this.preview) this.preview.setParts(this.draft.parts);
+    else this.previewHost.textContent = '3D preview needs WebGL, which is not available here.';
+  }
+
+  private rerender(): void {
+    if (!this.container) return;
+    this.container.replaceChildren();
+    this.render(this.container);
+  }
+
+  private startNew(): void {
+    this.draft = createObjectDefinition('New object', [createPart()]);
+    this.selectedPartId = this.draft.parts[0].id;
+    this.message = '';
+    this.rerender();
+  }
+
+  private libraryList(): HTMLElement {
+    const section = el('section', 'settings-section');
+    section.append(el('h2', '', 'Saved objects'));
+    const objects = this.library.list();
+    if (!objects.length) section.append(el('p', '', 'No saved objects yet. Build one below and save it by name.'));
+    const target = this.host.insertTarget();
+    for (const object of objects) {
+      const row = el('div', 'room-note object-row');
+      const bounds = partBounds(object.parts);
+      const size = [bounds.widthMeters, bounds.depthMeters, bounds.heightMeters].map((value) => value.toFixed(2)).join(' × ');
+      row.append(el('span', '', `${object.name} · ${size} m`));
+      row.append(btn('Edit', 'button quiet compact', () => {
+        this.draft = { ...object, parts: object.parts.map((part) => ({ ...part })) };
+        this.selectedPartId = this.draft.parts[0]?.id ?? null;
+        this.message = '';
+        this.rerender();
+      }));
+      const insert = btn('Insert', 'button primary compact', () => this.host.insert(object));
+      insert.disabled = !target;
+      insert.title = target ? `Insert into ${target}` : 'Open a project room on the Plan page first';
+      row.append(insert);
+      row.append(btn('Export', 'button quiet compact', () => this.exportObjects([object])));
+      row.append(btn('Delete', 'button quiet compact', () => {
+        this.library.delete(object.id);
+        this.rerender();
+      }));
+      section.append(row);
+    }
+    if (objects.length) section.append(btn('Export all', 'button quiet stretch', () => this.exportObjects(objects)));
+    section.append(el('p', '', target ? `Insert places objects in ${target}.` : 'Open a project room on the Plan page to insert objects.'));
+    return section;
+  }
+
+  private editor(): HTMLElement {
+    const section = el('section', 'settings-section object-editor');
+    section.append(el('h2', '', 'Object editor'));
+
+    const nameLabel = el('label', 'field');
+    const name = document.createElement('input');
+    name.type = 'text';
+    name.maxLength = 80;
+    name.value = this.draft.name;
+    name.addEventListener('input', () => { this.draft.name = name.value; });
+    nameLabel.append(el('span', 'field-label', 'Name'), name);
+
+    const presetLabel = el('label', 'field');
+    const preset = document.createElement('select');
+    preset.append(new Option('Start from a template…', ''));
+    OBJECT_PRESETS.forEach((item, index) => preset.append(new Option(item.label, String(index))));
+    preset.addEventListener('change', () => {
+      const chosen = OBJECT_PRESETS[Number(preset.value)];
+      if (!chosen) return;
+      this.draft.parts = chosen.build();
+      if (!name.value.trim() || name.value === 'New object') this.draft.name = chosen.label;
+      this.selectedPartId = this.draft.parts[0].id;
+      this.rerender();
+    });
+    presetLabel.append(el('span', 'field-label', 'Template'), preset);
+
+    const dims = el('p', 'object-dimensions');
+    const updateDims = () => {
+      const bounds = partBounds(this.draft.parts);
+      dims.textContent = `Overall: ${bounds.widthMeters.toFixed(2)} W × ${bounds.depthMeters.toFixed(2)} D × ${bounds.heightMeters.toFixed(2)} H m`;
+    };
+    updateDims();
+
+    section.append(nameLabel, presetLabel, this.previewHost, dims, this.partsEditor(updateDims));
+
+    const error = el('p', this.message.startsWith('Saved') ? 'field-hint' : 'field-error', this.message);
+    error.setAttribute('role', 'alert');
+    const actions = el('div', 'dialog-actions');
+    actions.append(
+      btn('Save by name', 'button primary', () => this.saveDraft()),
+      btn('Export file', 'button quiet', () => this.exportObjects([this.draft])),
+    );
+    section.append(error, actions);
+    return section;
+  }
+
+  private partsEditor(updateDims: () => void): HTMLElement {
+    const wrap = el('div', 'object-parts');
+    const list = el('div', 'object-part-list');
+    this.draft.parts.forEach((part, index) => {
+      const item = btn(`${index + 1}. ${part.shape === 'box' ? 'Box' : 'Cylinder'}`, part.id === this.selectedPartId ? 'button primary compact' : 'button quiet compact', () => {
+        this.selectedPartId = part.id;
+        this.rerender();
+      });
+      list.append(item);
+    });
+    const add = btn('Add part', 'button quiet compact', () => {
+      if (this.draft.parts.length >= MAX_PARTS) return;
+      const part = createPart();
+      this.draft.parts.push(part);
+      this.selectedPartId = part.id;
+      this.rerender();
+    });
+    list.append(add);
+    wrap.append(list);
+
+    const selected = this.draft.parts.find((part) => part.id === this.selectedPartId);
+    if (!selected) return wrap;
+
+    const refresh = () => {
+      updateDims();
+      this.preview?.setParts(this.draft.parts);
+    };
+    const grid = el('div', 'object-part-fields');
+
+    const shapeLabel = el('label', 'field');
+    const shape = document.createElement('select');
+    shape.append(new Option('Box', 'box'), new Option('Cylinder', 'cylinder'));
+    shape.value = selected.shape;
+    shape.addEventListener('change', () => {
+      selected.shape = shape.value === 'cylinder' ? 'cylinder' : 'box';
+      this.rerender();
+    });
+    shapeLabel.append(el('span', 'field-label', 'Shape'), shape);
+    grid.append(shapeLabel);
+
+    for (const field of DIMENSION_FIELDS) {
+      const label = el('label', 'field');
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.step = '0.05';
+      if (field.size) input.min = '0.01';
+      input.value = String(round(selected[field.key]));
+      input.addEventListener('change', () => {
+        const value = Number(input.value);
+        const valid = Number.isFinite(value) && (field.size ? value >= 0.01 && value <= 100 : Math.abs(value) <= 100);
+        if (!valid) {
+          input.value = String(round(selected[field.key]));
+          return;
+        }
+        selected[field.key] = value;
+        refresh();
+      });
+      label.append(el('span', 'field-label', field.label), input);
+      grid.append(label);
+    }
+
+    const colorLabel = el('label', 'field');
+    const color = document.createElement('input');
+    color.type = 'color';
+    color.value = selected.color;
+    color.addEventListener('input', () => {
+      selected.color = color.value;
+      refresh();
+    });
+    colorLabel.append(el('span', 'field-label', 'Colour'), color);
+    grid.append(colorLabel);
+    wrap.append(grid);
+
+    const actions = el('div', 'dialog-actions');
+    actions.append(
+      btn('Duplicate part', 'button quiet compact', () => {
+        if (this.draft.parts.length >= MAX_PARTS) return;
+        const copy: ObjectPart = { ...selected, id: createId(), xMeters: selected.xMeters + 0.1 };
+        this.draft.parts.push(copy);
+        this.selectedPartId = copy.id;
+        this.rerender();
+      }),
+      btn('Remove part', 'button quiet compact', () => {
+        if (this.draft.parts.length <= 1) {
+          this.message = 'An object needs at least one part.';
+          this.rerender();
+          return;
+        }
+        this.draft.parts = this.draft.parts.filter((part) => part.id !== selected.id);
+        this.selectedPartId = this.draft.parts[0].id;
+        this.rerender();
+      }),
+    );
+    wrap.append(actions);
+    return wrap;
+  }
+
+  private saveDraft(): void {
+    if (!this.draft.name.trim()) {
+      this.message = 'Enter a name for the object.';
+      this.rerender();
+      return;
+    }
+    const existing = this.library.list().find((item) => item.name.toLowerCase() === this.draft.name.trim().toLowerCase() && item.id !== this.draft.id);
+    if (existing && !window.confirm(`Replace the saved object "${existing.name}"?`)) return;
+    try {
+      this.draft = this.library.save({ ...this.draft, name: this.draft.name.trim() });
+      this.message = `Saved "${this.draft.name}".`;
+    } catch (error) {
+      this.message = error instanceof Error ? error.message : 'The object could not be saved.';
+    }
+    this.rerender();
+  }
+
+  private exportObjects(objects: ObjectDefinition[]): void {
+    try {
+      this.host.download(serializeObjects(objects), objectFilename(objects), 'application/json');
+    } catch (error) {
+      this.host.toast(error instanceof Error ? error.message : 'Export failed.');
+    }
+  }
+
+  private openImport(): void {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+    input.addEventListener('change', () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      if (file.size > 5 * 1024 * 1024) {
+        this.host.toast('The object file is larger than 5 MB.');
+        return;
+      }
+      void file.text().then((text) => {
+        try {
+          const imported = this.library.importAll(parseObjectFile(text));
+          this.host.toast(`Imported ${imported.length} object${imported.length === 1 ? '' : 's'}.`);
+          this.rerender();
+        } catch (error) {
+          this.host.toast(error instanceof ObjectValidationError ? error.message : 'The object file could not be imported.');
+        }
+      });
+    });
+    input.click();
+  }
+}
+
+function round(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
+
+function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text = ''): HTMLElementTagNameMap[K] {
+  const result = document.createElement(tag);
+  if (className) result.className = className;
+  if (text) result.textContent = text;
+  return result;
+}
+
+function btn(label: string, className: string, action: () => void): HTMLButtonElement {
+  const result = document.createElement('button');
+  result.type = 'button';
+  result.className = className;
+  result.textContent = label;
+  result.addEventListener('click', action);
+  return result;
+}

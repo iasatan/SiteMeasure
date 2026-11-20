@@ -1,4 +1,7 @@
 import { copyImportedProject, projectFilename, readProjectFile, serializeProject } from './data/project-files';
+import { ObjectLibrary } from './data/object-library';
+import { partBounds, type ObjectDefinition } from './domain/furniture';
+import { ObjectsPage } from './objects/objects-page';
 import { LocalStorageProjectRepository, type RepositoryWarning } from './data/local-storage-repository';
 import { createId, createProject, createRoom, DEFAULT_DOOR_HEIGHT_METERS, DEFAULT_WINDOW_HEIGHT_METERS, type PhotoAnnotation, type Project, type ProjectPhoto, type ProjectSummary, type Room } from './domain/models';
 import { FloorPlanEditor, type EditorSelection } from './editor/floor-plan-editor';
@@ -14,7 +17,7 @@ import { processPhoto } from './photos/photo-processing';
 import { floorPlanSvg, measurementsCsv, printableReport, svgToPng } from './reports/project-exports';
 import type { RoomVisualizationPhoto } from './reports/room-visualization';
 
-type PrimaryView = 'projects' | 'plan' | 'measure' | 'photos' | 'more';
+type PrimaryView = 'projects' | 'plan' | 'objects' | 'measure' | 'photos' | 'more';
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -26,6 +29,7 @@ interface UndoDeletion {
 const navItems: Array<{ id: PrimaryView; label: string }> = [
   { id: 'projects', label: 'Projects' },
   { id: 'plan', label: 'Plan' },
+  { id: 'objects', label: 'Objects' },
   { id: 'measure', label: 'Measure' },
   { id: 'photos', label: 'Photos' },
   { id: 'more', label: 'More' },
@@ -40,6 +44,16 @@ export class SiteMeasureApp {
   private bluetoothState: BluetoothConnectionState = 'ready';
   private bluetoothDetail = '';
   private measurementPanelContext: { project: Project; room: Room; wall: Project['buildings'][number]['floors'][number]['rooms'][number]['walls'][number] } | null = null;
+  private readonly objectsPage = new ObjectsPage(new ObjectLibrary(localStorage), {
+    insertTarget: () => {
+      const project = this.selectedProject();
+      const room = project ? this.activeRoom(project) : null;
+      return project && room ? `${project.name} › ${room.name}` : null;
+    },
+    insert: (definition) => this.insertObject(definition),
+    download: (text, filename, mimeType) => this.downloadText(text, filename, mimeType),
+    toast: (message) => this.showToast(message),
+  });
   private view: PrimaryView = 'projects';
   private selectedProjectId: string | null = null;
   private dirty = false;
@@ -143,6 +157,9 @@ export class SiteMeasureApp {
         break;
       case 'plan':
         this.renderWorkspace(main);
+        break;
+      case 'objects':
+        this.objectsPage.render(main);
         break;
       case 'measure':
         this.renderMeasurements(main);
@@ -286,6 +303,32 @@ export class SiteMeasureApp {
       this.render();
     });
     return select;
+  }
+
+  private insertObject(definition: ObjectDefinition): void {
+    const project = this.selectedProject();
+    const room = project ? this.activeRoom(project) : null;
+    if (!project || !room) {
+      this.showToast('Open a project room on the Plan page first.');
+      return;
+    }
+    const bounds = partBounds(definition.parts);
+    const xs = room.points.map((point) => point.xMeters);
+    const ys = room.points.map((point) => point.yMeters);
+    const centerX = xs.length ? (Math.min(...xs) + Math.max(...xs)) / 2 : 0;
+    const centerY = ys.length ? (Math.min(...ys) + Math.max(...ys)) / 2 : 0;
+    room.objects.push({
+      id: createId(),
+      name: definition.name,
+      widthMeters: bounds.widthMeters,
+      depthMeters: bounds.depthMeters,
+      heightMeters: bounds.heightMeters,
+      xMeters: centerX - bounds.widthMeters / 2,
+      yMeters: centerY - bounds.depthMeters / 2,
+      parts: definition.parts.map((part) => ({ ...part, id: createId() })),
+    });
+    project.modifiedAt = new Date().toISOString();
+    if (this.save(project)) this.showToast(`Inserted ${definition.name} into ${room.name}. Drag it into place on the Plan page.`);
   }
 
   private activeRoom(project: Project): Room | null {
@@ -1642,7 +1685,7 @@ function formValue(formData: FormData, name: string): string {
 }
 
 function navSymbol(view: PrimaryView): string {
-  return { projects: 'P', plan: '⌜', measure: '↕', photos: '□', more: '…' }[view];
+  return { projects: 'P', plan: '⌜', objects: '▣', measure: '↕', photos: '□', more: '…' }[view];
 }
 
 function formatDate(value: string): string {
