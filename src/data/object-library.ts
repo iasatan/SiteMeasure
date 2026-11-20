@@ -1,5 +1,5 @@
 import { createId } from '../domain/models';
-import { ObjectValidationError, validateObjectDefinition, type ObjectDefinition } from '../domain/furniture';
+import { cloneParts, ObjectValidationError, validateObjectDefinition, type ObjectDefinition } from '../domain/furniture';
 
 export const OBJECT_LIBRARY_KEY = 'sitemeasure:object-library';
 
@@ -44,7 +44,7 @@ export class ObjectLibrary {
     const imported = definitions.map((definition) => {
       const copy = validateObjectDefinition(definition);
       copy.id = createId();
-      copy.parts = copy.parts.map((part) => ({ ...part, id: createId() }));
+      copy.parts = cloneParts(copy.parts);
       return copy;
     });
     const names = new Set(imported.map((item) => item.name.toLowerCase()));
