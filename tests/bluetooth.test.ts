@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { providerForEnvironment } from '../src/bluetooth/providers/select-bluetooth-provider';
 import { validateBoschProfile, type BoschDeviceProfile } from '../src/bluetooth/profiles/bosch-device-profile';
+import { createCustomBoschProfile, loadCustomBoschProfileSettings, saveCustomBoschProfile } from '../src/bluetooth/custom-bosch-profile';
 import { MeasurementCapture } from '../src/bluetooth/measurement-capture';
 import { createRoom } from '../src/domain/models';
 
@@ -36,6 +37,29 @@ describe('Bosch profile validation', () => {
 
   it('rejects unverified TODO protocol values', () => {
     expect(() => validateBoschProfile({ ...validProfile, serviceUuid: 'TODO_VERIFIED_SERVICE_UUID' })).toThrow(/verified BLE UUID/);
+  });
+});
+
+describe('custom Bosch profiles', () => {
+  it('persists a configurable profile and decodes its measurement payload', () => {
+    const settings = {
+      displayName: 'My Bosch GLM',
+      namePrefix: 'Bosch GLM',
+      serviceUuid: '0000ffe0-0000-1000-8000-00805f9b34fb',
+      measurementCharacteristicUuid: '0000ffe1-0000-1000-8000-00805f9b34fb',
+      payloadFormat: 'float32-le-m' as const,
+      byteOffset: 1,
+    };
+    saveCustomBoschProfile(localStorage, settings);
+    expect(loadCustomBoschProfileSettings(localStorage)).toEqual(settings);
+    const profile = createCustomBoschProfile(settings);
+    const bytes = new Uint8Array([99, 0, 0, 0, 0]);
+    new DataView(bytes.buffer).setFloat32(1, 2.45, true);
+    expect(profile.parseMeasurement(new DataView(bytes.buffer), { deviceName: 'Bosch GLM', receivedAt: '2026-01-01T00:00:00.000Z' })?.valueMeters).toBeCloseTo(2.45);
+  });
+
+  it('rejects incomplete device identifiers and UUIDs', () => {
+    expect(() => createCustomBoschProfile({ displayName: '', namePrefix: '', serviceUuid: 'TODO', measurementCharacteristicUuid: '' })).toThrow();
   });
 });
 

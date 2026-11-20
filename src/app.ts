@@ -4,6 +4,7 @@ import { createId, createProject, createRoom, DEFAULT_DOOR_HEIGHT_METERS, DEFAUL
 import { FloorPlanEditor, type EditorSelection } from './editor/floor-plan-editor';
 import { deriveOpeningSegments, distanceBetween, formatLength, openingArea, polygonIssues, roomArea, roomHeight, roomVolume, wallArea, type OpeningSegmentKey } from './geometry';
 import { BoschLaserMeasureAdapter } from './bluetooth/bosch-laser-measure-adapter';
+import { clearCustomBoschProfile, loadCustomBoschProfile, loadCustomBoschProfileSettings, saveCustomBoschProfile, type BoschPayloadFormat } from './bluetooth/custom-bosch-profile';
 import { FakeLaserMeasureAdapter } from './bluetooth/fake-laser-measure-adapter';
 import { MeasurementCapture } from './bluetooth/measurement-capture';
 import { selectBluetoothProvider } from './bluetooth/providers/select-bluetooth-provider';
@@ -564,6 +565,7 @@ export class SiteMeasureApp {
       connectionActions.append(button('Receive simulated value', 'button quiet stretch', () => this.bluetoothAdapter instanceof FakeLaserMeasureAdapter && this.bluetoothAdapter.emitDemoMeasurement()));
     }
     panel.append(connectionActions);
+    panel.append(button('Configure device', 'button quiet stretch', () => this.showBluetoothSettingsDialog()));
 
     const captures = this.bluetoothCapture.list();
     if (captures.length) {
@@ -595,9 +597,10 @@ export class SiteMeasureApp {
 
   private async connectLaserMeasure(simulated: boolean): Promise<void> {
     await this.disconnectLaserMeasure(false);
+    const customProfile = loadCustomBoschProfile(localStorage);
     const adapter: LaserMeasureAdapter = simulated
       ? new FakeLaserMeasureAdapter()
-      : new BoschLaserMeasureAdapter(this.bluetoothProvider);
+      : new BoschLaserMeasureAdapter(this.bluetoothProvider, customProfile ? [customProfile] : undefined);
     this.bluetoothAdapter = adapter;
     try {
       await adapter.connect(
@@ -625,6 +628,84 @@ export class SiteMeasureApp {
     else this.bluetoothState = this.bluetoothProvider.label === 'iOSWebBLE required' ? 'extension-required' : 'not-available';
     this.bluetoothDetail = '';
     if (refresh) this.refreshBluetoothSurfaces();
+  }
+
+  private showBluetoothSettingsDialog(): void {
+    const saved = loadCustomBoschProfileSettings(localStorage);
+    const dialog = this.dialog();
+    const content = element('div', 'dialog-content');
+    content.append(element('p', 'eyebrow', 'Advanced Bluetooth'), element('h2', 'dialog-title', 'Laser measure profile'));
+    content.append(element('p', 'bluetooth-help', 'Enter the BLE identifiers and payload layout published for your Bosch model. Keep simulated capture enabled until a real measurement has been verified against the device display.'));
+
+    const field = (label: string, value: string, placeholder = '') => {
+      const wrapper = document.createElement('label');
+      wrapper.className = 'field';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = value;
+      input.placeholder = placeholder;
+      input.autocomplete = 'off';
+      wrapper.append(element('span', 'field-label', label), input);
+      return { wrapper, input };
+    };
+    const displayName = field('Device label', saved?.displayName ?? 'Bosch laser measure', 'Bosch GLM 50-27 C');
+    const namePrefix = field('Bluetooth name prefix', saved?.namePrefix ?? '', 'Bosch GLM');
+    const serviceUuid = field('Service UUID', saved?.serviceUuid ?? '', '0000180f-0000-1000-8000-00805f9b34fb');
+    const characteristicUuid = field('Measurement characteristic UUID', saved?.measurementCharacteristicUuid ?? '', '00002a19-0000-1000-8000-00805f9b34fb');
+    const payloadWrapper = document.createElement('label');
+    payloadWrapper.className = 'field';
+    const payloadFormat = document.createElement('select');
+    payloadFormat.className = 'room-selector';
+    const formats: Array<[BoschPayloadFormat, string]> = [
+      ['float32-le-m', '32-bit float, little-endian, meters'],
+      ['uint32-le-mm', '32-bit unsigned integer, little-endian, millimeters'],
+      ['uint32-le-0.1mm', '32-bit unsigned integer, little-endian, 0.1 millimeters'],
+      ['uint16-le-mm', '16-bit unsigned integer, little-endian, millimeters'],
+    ];
+    for (const [value, label] of formats) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      option.selected = value === saved?.payloadFormat;
+      payloadFormat.append(option);
+    }
+    payloadWrapper.append(element('span', 'field-label', 'Measurement payload format'), payloadFormat);
+    const byteOffset = field('Measurement byte offset', String(saved?.byteOffset ?? 0), '0');
+    byteOffset.input.inputMode = 'numeric';
+    const error = element('p', 'field-error');
+    error.setAttribute('role', 'alert');
+    content.append(displayName.wrapper, namePrefix.wrapper, serviceUuid.wrapper, characteristicUuid.wrapper, payloadWrapper, byteOffset.wrapper, error);
+
+    const actions = element('div', 'dialog-actions stacked');
+    actions.append(button('Cancel', 'button quiet', () => dialog.close()));
+    if (saved) actions.append(button('Remove profile', 'button danger', () => {
+      clearCustomBoschProfile(localStorage);
+      void this.disconnectLaserMeasure(false);
+      dialog.close();
+      this.render();
+      this.showToast('Bluetooth device profile removed');
+    }));
+    actions.append(button('Save profile', 'button primary', () => {
+      try {
+        saveCustomBoschProfile(localStorage, {
+          displayName: displayName.input.value,
+          namePrefix: namePrefix.input.value,
+          serviceUuid: serviceUuid.input.value,
+          measurementCharacteristicUuid: characteristicUuid.input.value,
+          payloadFormat: payloadFormat.value as BoschPayloadFormat,
+          byteOffset: parseInt(byteOffset.input.value, 10),
+        });
+        void this.disconnectLaserMeasure(false);
+        dialog.close();
+        this.render();
+        this.showToast('Bluetooth device profile saved');
+      } catch (settingsError) {
+        error.textContent = settingsError instanceof Error ? settingsError.message : 'The Bluetooth profile is invalid.';
+      }
+    }));
+    content.append(actions);
+    dialog.replaceChildren(content);
+    this.openDialog(dialog);
   }
 
   private bluetoothStateLabel(): string {
@@ -939,6 +1020,11 @@ export class SiteMeasureApp {
     storage.append(meter, element('p', '', `${formatBytes(usage.bytesUsed)} of approximately ${formatBytes(usage.quotaBytes ?? 0)} used`));
     if ((usage.percentUsed ?? 0) >= 0.7) storage.append(element('p', 'storage-warning', 'Device storage is above 70%. Export projects and remove unneeded photos to avoid save failures.'));
     storage.append(element('p', 'storage-warning', 'Clearing Safari website data can delete local projects. Export important projects regularly.'));
+    const bluetooth = element('section', 'settings-section');
+    bluetooth.append(element('h2', '', 'Bluetooth setup'));
+    const configuredProfile = loadCustomBoschProfileSettings(localStorage);
+    bluetooth.append(element('p', '', configuredProfile ? `${configuredProfile.displayName} is configured for ${this.bluetoothProvider.label}.` : 'No real-device profile is configured. Simulation remains available.'));
+    bluetooth.append(button(configuredProfile ? 'Edit device profile' : 'Configure laser measure', 'button quiet stretch', () => this.showBluetoothSettingsDialog()));
     const actions = element('section', 'settings-section');
     actions.append(element('h2', '', 'Project files and reports'));
     actions.append(button('Import project', 'button primary stretch', () => this.openImportPicker()));
@@ -954,7 +1040,7 @@ export class SiteMeasureApp {
       }
       actions.append(button('Print project report', 'button quiet stretch', () => this.printReport(current)));
     }
-    page.append(storage, actions);
+    page.append(storage, bluetooth, actions);
     main.append(page);
   }
 

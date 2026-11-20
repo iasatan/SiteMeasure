@@ -30,7 +30,7 @@ export class BoschLaserMeasureAdapter implements LaserMeasureAdapter {
     try {
       if (!(await this.provider.isAvailable())) throw new Error(this.provider.id === 'unsupported' ? 'Bluetooth is not available here.' : 'Bluetooth provider is unavailable.');
       this.profiles.forEach(validateBoschProfile);
-      if (this.profiles.length === 0) throw new Error('Real Bosch connections are disabled until a verified device profile is configured. Simulated capture and manual entry are available.');
+      if (this.profiles.length === 0) throw new Error('No Bosch device profile is configured. Open More > Bluetooth setup or choose Configure device below, then enter the BLE identifiers supplied for your measurer.');
 
       onState('searching');
       const device = await this.provider.requestDevice({
