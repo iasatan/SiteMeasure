@@ -256,6 +256,8 @@
   .editor-opening { stroke: #dce2da; stroke-width: 0.2; }
   .editor-window { stroke: #2782a5; stroke-width: 0.09; }
   .editor-door { stroke: var(--accent); stroke-width: 0.13; stroke-dasharray: 0.08 0.07; }
+  .editor-opening { cursor: pointer; pointer-events: stroke; }
+  .editor-opening.is-selected { stroke-width: 0.22; filter: drop-shadow(0 0 0.04rem var(--accent)); }
   .editor-dimension { fill: var(--green); font: 700 0.28px "Avenir Next", sans-serif; text-anchor: middle; paint-order: stroke; stroke: #e1e5dd; stroke-width: 0.08px; }
   .editor-point { fill: var(--accent); stroke: #fff; stroke-width: 0.06; vector-effect: non-scaling-stroke; pointer-events: all; }
   .editor-draft { fill: none; stroke: var(--accent); stroke-width: 0.08; stroke-dasharray: 0.14 0.1; }

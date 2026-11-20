@@ -46,7 +46,7 @@ export function openingArea(walls: Wall[], room: Room): number {
     ...room.doors.map((opening) => ({ opening, height: opening.heightMeters ?? DEFAULT_DOOR_HEIGHT_METERS })),
     ...room.windows.map((opening) => ({ opening, height: opening.heightMeters ?? DEFAULT_WINDOW_HEIGHT_METERS })),
   ];
-  return openings.reduce((sum, { opening, height }) => sum + (lengths.has(opening.wallId) ? opening.widthMeters * height : 0), 0);
+  return openings.reduce((sum, { opening, height }) => sum + (lengths.has(opening.wallId) && !opening.rightWallId ? opening.widthMeters * height : 0), 0);
 }
 
 export function metersToFeet(meters: number): number {

@@ -79,6 +79,7 @@ function validateRoom(value: unknown, path: string): void {
       const opening = expectRecord(openingValue, `${path}.${type}[${index}]`);
       expectString(opening.id, `${path}.${type}[${index}].id`, false);
       expectString(opening.wallId, `${path}.${type}[${index}].wallId`, false);
+      if (opening.rightWallId !== undefined) expectString(opening.rightWallId, `${path}.${type}[${index}].rightWallId`, false);
       expectFinite(opening.offsetMeters, `${path}.${type}[${index}].offsetMeters`, 0, 1_000_000);
       expectFinite(opening.widthMeters, `${path}.${type}[${index}].widthMeters`, 0.001, 1_000_000);
       if (opening.heightMeters !== undefined) expectFinite(opening.heightMeters, `${path}.${type}[${index}].heightMeters`, 0.01, 100);

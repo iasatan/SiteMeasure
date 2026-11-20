@@ -213,10 +213,12 @@ function remapRoomIds(room: Project['buildings'][number]['floors'][number]['room
   room.doors.forEach((door) => {
     door.id = mappedId(idMap, door.id);
     door.wallId = mappedId(idMap, door.wallId);
+    if (door.rightWallId) door.rightWallId = mappedId(idMap, door.rightWallId);
   });
   room.windows.forEach((window) => {
     window.id = mappedId(idMap, window.id);
     window.wallId = mappedId(idMap, window.wallId);
+    if (window.rightWallId) window.rightWallId = mappedId(idMap, window.rightWallId);
   });
   room.measurements.forEach((measurement) => {
     measurement.id = mappedId(idMap, measurement.id);

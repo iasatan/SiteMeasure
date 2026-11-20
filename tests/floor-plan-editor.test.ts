@@ -3,12 +3,16 @@ import { createRoom } from '../src/domain/models';
 import { FloorPlanEditor } from '../src/editor/floor-plan-editor';
 
 interface EditorInternals {
-  room: { walls: Array<{ start: { xMeters: number; yMeters: number }; end: { xMeters: number; yMeters: number } }> };
-  selection: { type: 'wall'; id: string } | null;
+  element: HTMLElement;
+  room: { walls: Array<{ id: string; start: { xMeters: number; yMeters: number }; end: { xMeters: number; yMeters: number } }>; doors: Array<{ id: string; wallId: string; rightWallId?: string; offsetMeters: number; widthMeters: number }> };
+  selection: { type: 'wall' | 'door' | 'window' | 'room' | 'object'; id: string } | null;
   dragOrigin: { xMeters: number; yMeters: number };
   originalRoom: unknown;
   setWallLength(lengthMeters: number): void;
+  addDoorToSelectedWall(widthMeters?: number): void;
+  deleteSelection(): void;
   handleWallDrag(point: { xMeters: number; yMeters: number }): void;
+  handleSelectionPointer(point: { xMeters: number; yMeters: number }, target: SVGElement | null): void;
 }
 
 function rectangleEditor(): EditorInternals {
@@ -38,6 +42,45 @@ describe('floor plan editor', () => {
     editor.originalRoom = structuredClone(editor.room);
     editor.handleWallDrag({ xMeters: 3.5, yMeters: 1 });
     expect(loop(editor)).toEqual([[0, 1, 4, 1], [4, 1, 4, 4], [4, 4, 0, 4], [0, 4, 0, 1]]);
+  });
+
+  it('splits a wall into independently selectable segments around a selectable door', () => {
+    const editor = rectangleEditor();
+    editor.selection = { type: 'wall', id: 'w0' };
+    editor.addDoorToSelectedWall(1);
+
+    expect(editor.room.walls).toHaveLength(5);
+    expect(editor.room.doors).toHaveLength(1);
+    const [door] = editor.room.doors;
+    expect(door.rightWallId).toBeTruthy();
+    const left = editor.room.walls.find((wall) => wall.id === door.wallId);
+    const right = editor.room.walls.find((wall) => wall.id === door.rightWallId);
+    expect([left?.end.xMeters, left?.end.yMeters]).toEqual([1.5, 0]);
+    expect([right?.start.xMeters, right?.start.yMeters]).toEqual([2.5, 0]);
+    expect([right?.end.xMeters, right?.end.yMeters]).toEqual([4, 0]);
+
+    const openingElement = editor.element.querySelector<SVGElement>('[data-opening-id]');
+    editor.handleSelectionPointer({ xMeters: 2, yMeters: 0 }, openingElement);
+    expect(editor.selection).toEqual({ type: 'door', id: door.id });
+
+    editor.deleteSelection();
+    expect(editor.room.walls).toHaveLength(4);
+    expect(editor.room.doors).toHaveLength(0);
+    expect(editor.room.walls[0].end).toEqual({ xMeters: 4, yMeters: 0 });
+  });
+
+  it('migrates existing overlay openings into a selectable wall chain', () => {
+    const editor = rectangleEditor();
+    editor.room.doors.push({ id: 'legacy-door', wallId: 'w0', offsetMeters: 0.2, widthMeters: 0.5 });
+    editor.selection = { type: 'wall', id: 'w0' };
+    editor.addDoorToSelectedWall(0.9);
+
+    expect(editor.room.walls).toHaveLength(6);
+    expect(editor.room.doors).toHaveLength(2);
+    expect(editor.room.doors.every((door) => Boolean(door.rightWallId))).toBe(true);
+    const legacyLeft = editor.room.walls.find((wall) => wall.id === editor.room.doors[0].wallId);
+    const legacyRight = editor.room.walls.find((wall) => wall.id === editor.room.doors[0].rightWallId);
+    expect([legacyLeft?.end.xMeters, legacyRight?.start.xMeters]).toEqual([0.2, 0.7]);
   });
 
   it('draws an object from two opposite corners', () => {

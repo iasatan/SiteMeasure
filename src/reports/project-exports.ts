@@ -31,10 +31,13 @@ export function floorPlanSvg(project: Project, room: Room): string {
   const openings = [...room.doors.map((opening) => ({ opening, type: 'door' })), ...room.windows.map((opening) => ({ opening, type: 'window' }))].map(({ opening, type }) => {
     const wall = room.walls.find((candidate) => candidate.id === opening.wallId);
     if (!wall) return '';
+    const rightWall = opening.rightWallId ? room.walls.find((candidate) => candidate.id === opening.rightWallId) : undefined;
     const angle = Math.atan2(wall.end.yMeters - wall.start.yMeters, wall.end.xMeters - wall.start.xMeters);
-    const startX = wall.start.xMeters + Math.cos(angle) * opening.offsetMeters;
-    const startY = wall.start.yMeters + Math.sin(angle) * opening.offsetMeters;
-    return `<line x1="${startX}" y1="${startY}" x2="${startX + Math.cos(angle) * opening.widthMeters}" y2="${startY + Math.sin(angle) * opening.widthMeters}" class="${type}"/>`;
+    const startX = rightWall ? wall.end.xMeters : wall.start.xMeters + Math.cos(angle) * opening.offsetMeters;
+    const startY = rightWall ? wall.end.yMeters : wall.start.yMeters + Math.sin(angle) * opening.offsetMeters;
+    const endX = rightWall ? rightWall.start.xMeters : startX + Math.cos(angle) * opening.widthMeters;
+    const endY = rightWall ? rightWall.start.yMeters : startY + Math.sin(angle) * opening.widthMeters;
+    return `<line x1="${startX}" y1="${startY}" x2="${endX}" y2="${endY}" class="${type}"/>`;
   }).join('');
   const outputHeight = Math.round(1600 * height / width);
   return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="${outputHeight}" viewBox="${minX} ${minY} ${width} ${height}" role="img" aria-label="${escapeXml(project.name)} ${escapeXml(room.name)}"><style>.room{fill:#fff;stroke:#173b33;stroke-width:.04}.wall{stroke:#173b33;stroke-width:.1;stroke-linecap:square}.door{stroke:#e85d3f;stroke-width:.12}.window{stroke:#2782a5;stroke-width:.09}text{font:700 .26px sans-serif;fill:#173b33;text-anchor:middle}</style><rect x="${minX}" y="${minY}" width="${width}" height="${height}" fill="#e1e5dd"/>${polygon}${walls}${openings}</svg>`;

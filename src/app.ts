@@ -321,7 +321,10 @@ export class SiteMeasureApp {
 
   private renderInspectorContents(inspector: HTMLElement, project: Project, room: Room): void {
     inspector.replaceChildren();
-    inspector.append(element('h2', '', this.editorSelection?.type === 'wall' ? 'Wall properties' : this.editorSelection?.type === 'object' ? 'Object properties' : 'Room overview'));
+    const openingSelection = this.editorSelection && (this.editorSelection.type === 'door' || this.editorSelection.type === 'window')
+      ? { type: this.editorSelection.type, id: this.editorSelection.id }
+      : null;
+    inspector.append(element('h2', '', this.editorSelection?.type === 'wall' ? 'Wall properties' : this.editorSelection?.type === 'object' ? 'Object properties' : openingSelection ? `${openingSelection.type === 'door' ? 'Door' : 'Window'} properties` : 'Room overview'));
     if (this.editorSelection?.type === 'wall') {
       const wall = room.walls.find((candidate) => candidate.id === this.editorSelection?.id) ?? this.activeEditor?.getSelectedWall();
       if (wall) {
@@ -349,6 +352,21 @@ export class SiteMeasureApp {
         const actions = element('div', 'selection-actions');
         actions.append(button('Delete', 'button danger', () => this.activeEditor?.deleteSelection()));
         inspector.append(readout, button('Measure or set size', 'button primary stretch', () => this.showObjectDialog(project, room, object.id)), actions);
+      }
+    } else if (openingSelection) {
+      const openingType = openingSelection.type;
+      const found = this.activeEditor?.getOpening(openingType, openingSelection.id);
+      if (found) {
+        const readout = element('div', 'measurement-readout');
+        const height = found.opening.heightMeters ?? (openingSelection.type === 'door' ? DEFAULT_DOOR_HEIGHT_METERS : DEFAULT_WINDOW_HEIGHT_METERS);
+        readout.append(element('small', '', 'Width × height'), element('strong', '', `${formatLength(found.opening.widthMeters, project.preferredUnits)} × ${formatLength(height, project.preferredUnits)}`));
+        const actions = element('div', 'selection-actions');
+        actions.append(button('Edit segments', 'button primary', () => this.showOpeningDialog(project, openingType, openingSelection.id)));
+        actions.append(button('Remove', 'button danger', () => this.activeEditor?.deleteSelection()));
+        const help = found.opening.rightWallId
+          ? 'This opening separates two independently selectable wall segments.'
+          : 'This imported opening uses the compatible overlay model. New openings are split into separate wall segments.';
+        inspector.append(readout, element('p', 'inspector-help', help), actions);
       }
     } else {
       const issues = polygonIssues(room.points).filter(() => room.points.length > 0);
@@ -459,7 +477,9 @@ export class SiteMeasureApp {
     const actions = element('div', 'dialog-actions');
     actions.append(button('Cancel', 'button quiet', () => dialog.close()));
     actions.append(button('Apply', 'button primary', () => {
-      const valid = keys.every((key) => Number.isFinite(values[key])) && values.total > 0 && values.width > 0 && values.before >= 0 && values.after >= -1e-9;
+      const hasSplitWalls = Boolean(found.opening.rightWallId);
+      const valid = keys.every((key) => Number.isFinite(values[key])) && values.total > 0 && values.width > 0
+        && (hasSplitWalls ? values.before > 0 && values.after > 0 : values.before >= 0 && values.after >= -1e-9);
       const height = parseDecimalInput(heightInput.value) / factor;
       if (!valid || !(height > 0 && height <= 100) || !this.activeEditor?.updateOpening(kind, id, values.total, values.before, values.width, height)) {
         error.textContent = 'The segments and height must be positive and the segments must add up to the wall length.';

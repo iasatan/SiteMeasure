@@ -25,6 +25,7 @@ export const DEFAULT_WINDOW_HEIGHT_METERS = 1.2;
 export interface Door {
   id: string;
   wallId: string;
+  rightWallId?: string;
   offsetMeters: number;
   widthMeters: number;
   heightMeters?: number;
@@ -33,6 +34,7 @@ export interface Door {
 export interface Window {
   id: string;
   wallId: string;
+  rightWallId?: string;
   offsetMeters: number;
   widthMeters: number;
   heightMeters?: number;

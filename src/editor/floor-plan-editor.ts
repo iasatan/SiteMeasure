@@ -2,7 +2,7 @@ import { createId, type Door, type Point, type Room, type RoomObject, type Wall,
 import { cornerAngleDegrees, distanceBetween, formatLength, nearestPointOnSegment, perpendicularPoint, polygonIssues, roomArea, setCornerAngle, snapPoint } from '../geometry';
 
 export type EditorTool = 'select' | 'wall' | 'room' | 'door' | 'window' | 'object' | 'measure';
-export type EditorSelection = { type: 'wall' | 'room' | 'object'; id: string } | null;
+export type EditorSelection = { type: 'wall' | 'room' | 'object' | 'door' | 'window'; id: string } | null;
 
 export interface FloorPlanEditorOptions {
   room: Room;
@@ -224,8 +224,10 @@ export class FloorPlanEditor {
       this.room.objects = this.room.objects.filter((object) => object.id !== this.selection?.id);
     } else if (this.selection.type === 'wall') {
       this.room.walls = this.room.walls.filter((wall) => wall.id !== this.selection?.id);
-      this.room.doors = this.room.doors.filter((door) => door.wallId !== this.selection?.id);
-      this.room.windows = this.room.windows.filter((window) => window.wallId !== this.selection?.id);
+      this.room.doors = this.room.doors.filter((door) => door.wallId !== this.selection?.id && door.rightWallId !== this.selection?.id);
+      this.room.windows = this.room.windows.filter((window) => window.wallId !== this.selection?.id && window.rightWallId !== this.selection?.id);
+    } else if (this.selection.type === 'door' || this.selection.type === 'window') {
+      this.removeOpening(this.selection.type, this.selection.id);
     } else {
       this.room.points = [];
       this.room.walls = [];
@@ -268,19 +270,30 @@ export class FloorPlanEditor {
 
   getOpening(kind: OpeningKind, id: string): { opening: Door | Window; wall: Wall } | null {
     const opening = (kind === 'door' ? this.room.doors : this.room.windows).find((candidate) => candidate.id === id);
-    const wall = opening ? this.room.walls.find((candidate) => candidate.id === opening.wallId) : undefined;
-    return opening && wall ? structuredClone({ opening, wall }) : null;
+    if (!opening) return null;
+    const leftWall = this.room.walls.find((candidate) => candidate.id === opening.wallId);
+    if (!leftWall) return null;
+    const rightWall = opening.rightWallId ? this.room.walls.find((candidate) => candidate.id === opening.rightWallId) : null;
+    if (rightWall) {
+      const logicalWall = structuredClone(leftWall);
+      logicalWall.end = structuredClone(rightWall.end);
+      delete logicalWall.lengthMeters;
+      return { opening: { ...structuredClone(opening), offsetMeters: distanceBetween(leftWall.start, leftWall.end) }, wall: logicalWall };
+    }
+    return structuredClone({ opening, wall: leftWall });
   }
 
   updateOpening(kind: OpeningKind, id: string, wallLengthMeters: number, offsetMeters: number, widthMeters: number, heightMeters?: number): boolean {
-    const opening = (kind === 'door' ? this.room.doors : this.room.windows).find((candidate) => candidate.id === id);
-    const wall = opening ? this.room.walls.find((candidate) => candidate.id === opening.wallId) : undefined;
-    if (!opening || !wall || wallLengthMeters <= 0 || widthMeters <= 0 || offsetMeters < 0) return false;
+    const openings = kind === 'door' ? this.room.doors : this.room.windows;
+    const opening = openings.find((candidate) => candidate.id === id);
+    const leftWall = opening ? this.room.walls.find((candidate) => candidate.id === opening.wallId) : undefined;
+    if (!opening || !leftWall || wallLengthMeters <= 0 || widthMeters <= 0 || offsetMeters < 0) return false;
     if (offsetMeters + widthMeters > wallLengthMeters + 1e-9) return false;
+    const rightWall = opening.rightWallId ? this.room.walls.find((candidate) => candidate.id === opening.rightWallId) : undefined;
+    if (opening.rightWallId && (!rightWall || offsetMeters <= 0 || offsetMeters + widthMeters >= wallLengthMeters)) return false;
     this.beginAction();
-    if (Math.abs(wallLengthMeters - distanceBetween(wall.start, wall.end)) > 1e-9) {
-      this.resizeWall(wall, wallLengthMeters);
-    }
+    if (rightWall) this.resizeSplitOpening(leftWall, rightWall, wallLengthMeters, offsetMeters, widthMeters);
+    else if (Math.abs(wallLengthMeters - distanceBetween(leftWall.start, leftWall.end)) > 1e-9) this.resizeWall(leftWall, wallLengthMeters);
     opening.offsetMeters = offsetMeters;
     opening.widthMeters = widthMeters;
     if (heightMeters !== undefined) opening.heightMeters = heightMeters;
@@ -292,8 +305,8 @@ export class FloorPlanEditor {
     const wall = this.selectedWall();
     if (!wall) return [];
     return [
-      ...this.room.doors.filter((door) => door.wallId === wall.id).map((opening) => ({ kind: 'door' as const, opening: structuredClone(opening) })),
-      ...this.room.windows.filter((window) => window.wallId === wall.id).map((opening) => ({ kind: 'window' as const, opening: structuredClone(opening) })),
+      ...this.room.doors.filter((door) => door.wallId === wall.id || door.rightWallId === wall.id).map((opening) => ({ kind: 'door' as const, opening: structuredClone(opening) })),
+      ...this.room.windows.filter((window) => window.wallId === wall.id || window.rightWallId === wall.id).map((opening) => ({ kind: 'window' as const, opening: structuredClone(opening) })),
     ];
   }
 
@@ -309,9 +322,13 @@ export class FloorPlanEditor {
     const wall = this.selectedWall();
     if (!wall) return;
     const length = distanceBetween(wall.start, wall.end);
-    if (length < widthMeters) return;
+    if (length <= widthMeters + 0.1) return;
+    const offsetMeters = (length - widthMeters) / 2;
+    const opening = { id: createId(), wallId: wall.id, offsetMeters, widthMeters };
+    const existing = [...this.room.doors, ...this.room.windows].filter((candidate) => !candidate.rightWallId && candidate.wallId === wall.id);
+    if (!this.canSplitWallForOpenings(wall, [...existing, opening])) return;
     this.beginAction();
-    const opening = { id: createId(), wallId: wall.id, offsetMeters: (length - widthMeters) / 2, widthMeters };
+    this.splitWallForOpenings(wall, [...existing, opening]);
     if (type === 'door') this.room.doors.push(opening as Door);
     else this.room.windows.push(opening as Window);
     this.commitAction();
@@ -381,7 +398,7 @@ export class FloorPlanEditor {
       return;
     }
 
-    const target = (event.target as Element).closest<SVGElement>('[data-wall-id], [data-object-id], [data-room-id]');
+    const target = (event.target as Element).closest<SVGElement>('[data-wall-id], [data-opening-id], [data-object-id], [data-room-id]');
     if (this.handleToolPointer(world, target)) return;
     this.handleSelectionPointer(world, target);
   }
@@ -416,6 +433,10 @@ export class FloorPlanEditor {
   }
 
   private handleSelectionPointer(world: Point, target: SVGElement | null): void {
+    if (target?.dataset.openingId && (target.dataset.openingType === 'door' || target.dataset.openingType === 'window')) {
+      this.select({ type: target.dataset.openingType, id: target.dataset.openingId });
+      return;
+    }
     if (target?.dataset.wallId) {
       this.select({ type: 'wall', id: target.dataset.wallId });
       if (this.selectedWall()?.locked) return;
@@ -532,6 +553,7 @@ export class FloorPlanEditor {
     if (this.dragOrigin && this.originalRoom) {
       const changed = JSON.stringify(this.room) !== JSON.stringify(this.originalRoom);
       if (changed) {
+        this.syncSplitOpenings();
         this.undoStack.push(this.originalRoom);
         this.redoStack = [];
         this.onChange(structuredClone(this.room), true);
@@ -652,16 +674,110 @@ export class FloorPlanEditor {
   }
 
   private addOpeningAt(type: EditorTool, wall: Wall, world: Point): void {
-    this.beginAction();
     const point = nearestPointOnSegment(world, wall.start, wall.end);
     const wallLength = distanceBetween(wall.start, wall.end);
     const width = type === 'door' ? Math.min(0.9, wallLength * 0.7) : Math.min(1.2, wallLength * 0.7);
     const fromStart = distanceBetween(wall.start, point);
-    const offset = Math.max(0, Math.min(wallLength - width, fromStart - width / 2));
+    const minimumSide = 0.05;
+    const offset = Math.max(minimumSide, Math.min(wallLength - width - minimumSide, fromStart - width / 2));
     const opening = { id: createId(), wallId: wall.id, offsetMeters: offset, widthMeters: width };
+    const existing = [...this.room.doors, ...this.room.windows].filter((candidate) => !candidate.rightWallId && candidate.wallId === wall.id);
+    if (!this.canSplitWallForOpenings(wall, [...existing, opening])) return;
+    this.beginAction();
+    this.splitWallForOpenings(wall, [...existing, opening]);
     if (type === 'door') this.room.doors.push(opening as Door);
     else this.room.windows.push(opening as Window);
     this.commitAction();
+  }
+
+  private canSplitWallForOpenings(wall: Wall, openings: Array<Door | Window>): boolean {
+    const length = distanceBetween(wall.start, wall.end);
+    const sorted = [...openings].sort((left, right) => left.offsetMeters - right.offsetMeters);
+    let cursor = 0;
+    for (const opening of sorted) {
+      if (opening.offsetMeters - cursor <= 0.05 || opening.widthMeters <= 0) return false;
+      cursor = opening.offsetMeters + opening.widthMeters;
+      if (cursor > length + 1e-9) return false;
+    }
+    return length - cursor > 0.05;
+  }
+
+  private splitWallForOpenings(wall: Wall, openings: Array<Door | Window>): void {
+    const sorted = [...openings].sort((left, right) => left.offsetMeters - right.offsetMeters);
+    const originalStart = structuredClone(wall.start);
+    const originalEnd = structuredClone(wall.end);
+    const angle = Math.atan2(originalEnd.yMeters - originalStart.yMeters, originalEnd.xMeters - originalStart.xMeters);
+    const pointAt = (distance: number) => ({
+      xMeters: originalStart.xMeters + Math.cos(angle) * distance,
+      yMeters: originalStart.yMeters + Math.sin(angle) * distance,
+    });
+    const segments: Wall[] = [];
+    let cursor = 0;
+    for (let index = 0; index <= sorted.length; index += 1) {
+      const end = index === sorted.length ? distanceBetween(originalStart, originalEnd) : sorted[index].offsetMeters;
+      const segment = index === 0 ? wall : { ...structuredClone(wall), id: createId() };
+      segment.start = pointAt(cursor);
+      segment.end = pointAt(end);
+      delete segment.lengthMeters;
+      segments.push(segment);
+      if (index < sorted.length) cursor = sorted[index].offsetMeters + sorted[index].widthMeters;
+    }
+    sorted.forEach((opening, index) => {
+      opening.wallId = segments[index].id;
+      opening.rightWallId = segments[index + 1].id;
+    });
+    const wallIndex = this.room.walls.indexOf(wall);
+    this.room.walls.splice(wallIndex, 1, ...segments);
+    const migratedIds = new Set(sorted.map((opening) => opening.id));
+    const lastSegmentId = segments[segments.length - 1].id;
+    for (const otherOpening of [...this.room.doors, ...this.room.windows]) {
+      if (migratedIds.has(otherOpening.id)) continue;
+      if (otherOpening.wallId === wall.id) otherOpening.wallId = lastSegmentId;
+    }
+  }
+
+  private resizeSplitOpening(leftWall: Wall, rightWall: Wall, totalLength: number, offsetMeters: number, widthMeters: number): void {
+    const oldEnd = structuredClone(rightWall.end);
+    const angle = Math.atan2(rightWall.end.yMeters - leftWall.start.yMeters, rightWall.end.xMeters - leftWall.start.xMeters);
+    const pointAt = (distance: number) => ({
+      xMeters: leftWall.start.xMeters + Math.cos(angle) * distance,
+      yMeters: leftWall.start.yMeters + Math.sin(angle) * distance,
+    });
+    leftWall.end = pointAt(offsetMeters);
+    rightWall.start = pointAt(offsetMeters + widthMeters);
+    rightWall.end = pointAt(totalLength);
+    delete leftWall.lengthMeters;
+    delete rightWall.lengthMeters;
+    this.moveConnectedPoint(oldEnd, rightWall.end, new Set([leftWall.id, rightWall.id]));
+    this.room.points = this.room.points.map((point) => distanceBetween(point, oldEnd) < 0.05 ? structuredClone(rightWall.end) : point);
+  }
+
+  private removeOpening(kind: OpeningKind, id: string): void {
+    const openings = kind === 'door' ? this.room.doors : this.room.windows;
+    const opening = openings.find((candidate) => candidate.id === id);
+    if (!opening) return;
+    const leftWall = this.room.walls.find((wall) => wall.id === opening.wallId);
+    const rightWall = opening.rightWallId ? this.room.walls.find((wall) => wall.id === opening.rightWallId) : undefined;
+    if (leftWall && rightWall) {
+      leftWall.end = structuredClone(rightWall.end);
+      delete leftWall.lengthMeters;
+      this.room.walls = this.room.walls.filter((wall) => wall.id !== rightWall.id);
+      for (const otherOpening of [...this.room.doors, ...this.room.windows]) {
+        if (otherOpening.id === id) continue;
+        if (otherOpening.wallId === rightWall.id) otherOpening.wallId = leftWall.id;
+        if (otherOpening.rightWallId === rightWall.id) otherOpening.rightWallId = leftWall.id;
+      }
+    }
+    if (kind === 'door') this.room.doors = this.room.doors.filter((candidate) => candidate.id !== id);
+    else this.room.windows = this.room.windows.filter((candidate) => candidate.id !== id);
+  }
+
+  private moveConnectedPoint(from: Point, to: Point, excludedWallIds: Set<string>): void {
+    for (const wall of this.room.walls) {
+      if (excludedWallIds.has(wall.id)) continue;
+      if (distanceBetween(wall.start, from) < 0.05) wall.start = structuredClone(to);
+      if (distanceBetween(wall.end, from) < 0.05) wall.end = structuredClone(to);
+    }
   }
 
   private select(selection: EditorSelection): void {
@@ -681,8 +797,20 @@ export class FloorPlanEditor {
   }
 
   private commitAction(): void {
+    this.syncSplitOpenings();
     this.onChange(structuredClone(this.room), true);
     this.render();
+  }
+
+  private syncSplitOpenings(): void {
+    for (const opening of [...this.room.doors, ...this.room.windows]) {
+      if (!opening.rightWallId) continue;
+      const leftWall = this.room.walls.find((wall) => wall.id === opening.wallId);
+      const rightWall = this.room.walls.find((wall) => wall.id === opening.rightWallId);
+      if (!leftWall || !rightWall) continue;
+      opening.offsetMeters = distanceBetween(leftWall.start, leftWall.end);
+      opening.widthMeters = distanceBetween(leftWall.end, rightWall.start);
+    }
   }
 
   /** Moves the wall's end point and keeps the room connected; a perpendicular next wall is translated so rectangles shrink instead of tearing. */
@@ -829,18 +957,23 @@ export class FloorPlanEditor {
   }
 
   private buildOpening(opening: Door | Window, type: 'door' | 'window'): SVGElement {
-    const wall = this.room.walls.find((candidate) => candidate.id === opening.wallId);
-    if (!wall) return svgElement('g', 'editor-opening-missing');
-    const wallLength = distanceBetween(wall.start, wall.end);
-    const angle = Math.atan2(wall.end.yMeters - wall.start.yMeters, wall.end.xMeters - wall.start.xMeters);
-    const start = { xMeters: wall.start.xMeters + Math.cos(angle) * opening.offsetMeters, yMeters: wall.start.yMeters + Math.sin(angle) * opening.offsetMeters };
-    const end = { xMeters: start.xMeters + Math.cos(angle) * Math.min(opening.widthMeters, wallLength), yMeters: start.yMeters + Math.sin(angle) * Math.min(opening.widthMeters, wallLength) };
+    const leftWall = this.room.walls.find((candidate) => candidate.id === opening.wallId);
+    if (!leftWall) return svgElement('g', 'editor-opening-missing');
+    const rightWall = opening.rightWallId ? this.room.walls.find((candidate) => candidate.id === opening.rightWallId) : undefined;
+    const wallEnd = rightWall?.end ?? leftWall.end;
+    const wallLength = distanceBetween(leftWall.start, wallEnd);
+    const angle = Math.atan2(wallEnd.yMeters - leftWall.start.yMeters, wallEnd.xMeters - leftWall.start.xMeters);
+    const offset = rightWall ? distanceBetween(leftWall.start, leftWall.end) : opening.offsetMeters;
+    const start = rightWall ? structuredClone(leftWall.end) : { xMeters: leftWall.start.xMeters + Math.cos(angle) * offset, yMeters: leftWall.start.yMeters + Math.sin(angle) * offset };
+    const end = rightWall ? structuredClone(rightWall.start) : { xMeters: start.xMeters + Math.cos(angle) * Math.min(opening.widthMeters, wallLength), yMeters: start.yMeters + Math.sin(angle) * Math.min(opening.widthMeters, wallLength) };
     const line = svgElement('line', `editor-opening editor-${type}`);
     line.setAttribute('x1', String(start.xMeters));
     line.setAttribute('y1', String(start.yMeters));
     line.setAttribute('x2', String(end.xMeters));
     line.setAttribute('y2', String(end.yMeters));
-    line.dataset.wallId = wall.id;
+    line.dataset.openingId = opening.id;
+    line.dataset.openingType = type;
+    if (this.selection?.id === opening.id && this.selection.type === type) line.classList.add('is-selected');
     return line;
   }
 
