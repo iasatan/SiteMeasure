@@ -19,9 +19,10 @@ import { createId } from '../domain/models';
 import { createObjectPreview, type ObjectPreview } from './object-preview';
 
 export interface ObjectsPageHost {
-  /** Describes where "Insert" will place objects, or null when no room is open. */
-  insertTarget(): string | null;
-  insert(definition: ObjectDefinition): void;
+  /** Projects ordered most recently modified first. */
+  projects(): Array<{ id: string; name: string }>;
+  rooms(projectId: string): Array<{ id: string; name: string }>;
+  insert(definition: ObjectDefinition, projectId: string, roomId: string): void;
   download(text: string, filename: string, mimeType: string): void;
   toast(message: string): void;
 }
@@ -44,6 +45,8 @@ export class ObjectsPage {
   private readonly previewHost = document.createElement('div');
   private preview: ObjectPreview | null | undefined;
   private container: HTMLElement | null = null;
+  private targetProjectId: string | null = null;
+  private targetRoomId: string | null = null;
 
   constructor(private readonly library: ObjectLibrary, private readonly host: ObjectsPageHost) {
     this.previewHost.className = 'object-preview';
@@ -86,7 +89,24 @@ export class ObjectsPage {
     section.append(el('h2', '', 'Saved objects'));
     const objects = this.library.list();
     if (!objects.length) section.append(el('p', '', 'No saved objects yet. Build one below and save it by name.'));
-    const target = this.host.insertTarget();
+    const projects = this.host.projects();
+    if (!projects.some((project) => project.id === this.targetProjectId)) {
+      this.targetProjectId = projects[0]?.id ?? null;
+      this.targetRoomId = null;
+    }
+    const rooms = this.targetProjectId ? this.host.rooms(this.targetProjectId) : [];
+    if (!rooms.some((room) => room.id === this.targetRoomId)) this.targetRoomId = rooms[rooms.length - 1]?.id ?? null;
+    const projectId = this.targetProjectId;
+    const roomId = this.targetRoomId;
+    const target = projectId && roomId ? 'selected room' : null;
+    if (projects.length) {
+      const picker = el('div', 'insert-target');
+      picker.append(
+        this.select('Project', projects, projectId, (value) => { this.targetProjectId = value; this.targetRoomId = null; this.rerender(); }),
+        this.select('Room', rooms, roomId, (value) => { this.targetRoomId = value; this.rerender(); }),
+      );
+      section.append(picker);
+    }
     for (const object of objects) {
       const row = el('div', 'room-note object-row');
       const bounds = partBounds(object.parts);
@@ -98,9 +118,9 @@ export class ObjectsPage {
         this.message = '';
         this.rerender();
       }));
-      const insert = btn('Insert', 'button primary compact', () => this.host.insert(object));
+      const insert = btn('Insert', 'button primary compact', () => this.host.insert(object, projectId!, roomId!));
       insert.disabled = !target;
-      insert.title = target ? `Insert into ${target}` : 'Open a project room on the Plan page first';
+      insert.title = target ? 'Insert into the selected room' : 'Create a project with a room first';
       row.append(insert);
       row.append(btn('Export', 'button quiet compact', () => this.exportObjects([object])));
       row.append(btn('Delete', 'button quiet compact', () => {
@@ -110,8 +130,25 @@ export class ObjectsPage {
       section.append(row);
     }
     if (objects.length) section.append(btn('Export all', 'button quiet stretch', () => this.exportObjects(objects)));
-    section.append(el('p', '', target ? `Insert places objects in ${target}.` : 'Open a project room on the Plan page to insert objects.'));
+    if (!target) section.append(el('p', '', 'Create a project with a room to insert objects.'));
     return section;
+  }
+
+  private select(label: string, options: Array<{ id: string; name: string }>, value: string | null, onChange: (value: string) => void): HTMLElement {
+    const wrapper = el('label', 'field');
+    wrapper.append(el('span', '', label));
+    const select = document.createElement('select');
+    select.className = 'room-selector';
+    for (const option of options) {
+      const node = document.createElement('option');
+      node.value = option.id;
+      node.textContent = option.name;
+      node.selected = option.id === value;
+      select.append(node);
+    }
+    select.addEventListener('change', () => onChange(select.value));
+    wrapper.append(select);
+    return wrapper;
   }
 
   private editor(): HTMLElement {

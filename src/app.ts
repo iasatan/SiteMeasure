@@ -28,7 +28,6 @@ interface UndoDeletion {
 
 const navItems: Array<{ id: PrimaryView; label: string }> = [
   { id: 'projects', label: 'Projects' },
-  { id: 'plan', label: 'Plan' },
   { id: 'objects', label: 'Objects' },
   { id: 'measure', label: 'Measure' },
   { id: 'photos', label: 'Photos' },
@@ -45,12 +44,12 @@ export class SiteMeasureApp {
   private bluetoothDetail = '';
   private measurementPanelContext: { project: Project; room: Room; wall: Project['buildings'][number]['floors'][number]['rooms'][number]['walls'][number] } | null = null;
   private readonly objectsPage = new ObjectsPage(new ObjectLibrary(localStorage), {
-    insertTarget: () => {
-      const project = this.selectedProject();
-      const room = project ? this.activeRoom(project) : null;
-      return project && room ? `${project.name} › ${room.name}` : null;
+    projects: () => this.repository.list().map((summary) => ({ id: summary.id, name: summary.name })),
+    rooms: (projectId) => {
+      const project = this.repository.get(projectId);
+      return project ? project.buildings.flatMap((building) => building.floors.flatMap((floor) => floor.rooms.map((room) => ({ id: room.id, name: `${building.name} / ${floor.name} / ${room.name}` })))) : [];
     },
-    insert: (definition) => this.insertObject(definition),
+    insert: (definition, projectId, roomId) => this.insertObject(definition, projectId, roomId),
     download: (text, filename, mimeType) => this.downloadText(text, filename, mimeType),
     toast: (message) => this.showToast(message),
   });
@@ -305,11 +304,11 @@ export class SiteMeasureApp {
     return select;
   }
 
-  private insertObject(definition: ObjectDefinition): void {
-    const project = this.selectedProject();
-    const room = project ? this.activeRoom(project) : null;
+  private insertObject(definition: ObjectDefinition, projectId: string, roomId: string): void {
+    const project = this.repository.get(projectId);
+    const room = project?.buildings.flatMap((building) => building.floors.flatMap((floor) => floor.rooms)).find((candidate) => candidate.id === roomId);
     if (!project || !room) {
-      this.showToast('Open a project room on the Plan page first.');
+      this.showToast('Choose a project and room first.');
       return;
     }
     const bounds = partBounds(definition.parts);
@@ -328,7 +327,7 @@ export class SiteMeasureApp {
       parts: cloneParts(definition.parts),
     });
     project.modifiedAt = new Date().toISOString();
-    if (this.save(project)) this.showToast(`Inserted ${definition.name} into ${room.name}. Drag it into place on the Plan page.`);
+    if (this.save(project)) this.showToast(`Inserted ${definition.name} into ${room.name}. Drag it into place in the project plan.`);
   }
 
   private activeRoom(project: Project): Room | null {
