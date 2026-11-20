@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createProject, createRoom } from '../src/domain/models';
 import { csvCell, floorPlanSvg, measurementsCsv, printableReport } from '../src/reports/project-exports';
+import { roomSlideshowHtml } from '../src/reports/room-visualization';
 
 describe('project reports', () => {
   it('escapes CSV and neutralizes spreadsheet formulas', () => {
@@ -24,5 +25,18 @@ describe('project reports', () => {
     const svg = floorPlanSvg(project, room);
     expect(svg).toContain('xmlns="http://www.w3.org/2000/svg"');
     expect(svg).toContain('<polygon');
+  });
+
+  it('creates a downloadable four-image 3D slideshow', () => {
+    const photos = ['Front', 'Side', 'Rear', 'Plan'].map((label, index) => ({ label, dataUrl: `data:image/png;base64,image-${index}` }));
+    const html = roomSlideshowHtml('House <script>', 'Kitchen & dining', photos);
+
+    expect(html.match(/<figure class="slide/g)).toHaveLength(4);
+    expect(html).toContain("document.querySelector('#previous')");
+    expect(html).toContain("document.querySelector('#next')");
+    expect(html.match(/<script>/g)).toHaveLength(1);
+    expect(html).not.toContain('<script>alert');
+    expect(html).toContain('House &lt;script&gt;');
+    expect(html).toContain('Kitchen &amp; dining');
   });
 });
