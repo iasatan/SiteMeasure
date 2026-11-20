@@ -13,6 +13,8 @@ export interface ObjectPart {
   heightMeters: number;
   depthMeters: number;
   color: string;
+  /** Part this one is attached to; it follows when the parent is moved or resized. */
+  parentId?: string;
 }
 
 export interface ObjectDefinition {
@@ -68,56 +70,7 @@ export function createObjectDefinition(name: string, parts: ObjectPart[] = []): 
   return { id: createId(), name: name.trim() || 'Untitled object', parts: parts.map((part) => ({ ...part })), createdAt: now, modifiedAt: now };
 }
 
-function box(x: number, y: number, z: number, w: number, h: number, d: number, color: string, shape: PartShape = 'box'): ObjectPart {
-  return { id: createId(), shape, xMeters: x, yMeters: y, zMeters: z, widthMeters: w, heightMeters: h, depthMeters: d, color };
-}
-
-export interface ObjectPreset {
-  label: string;
-  build: () => ObjectPart[];
-}
-
-export const OBJECT_PRESETS: ObjectPreset[] = [
-  {
-    label: 'Couch',
-    build: () => [
-      box(0, 0.2, 0, 2, 0.4, 0.9, '#6b7f8c'),
-      box(0, 0.6, -0.35, 2, 0.5, 0.2, '#58707e'),
-      box(-0.9, 0.5, 0.05, 0.2, 0.2, 0.8, '#58707e'),
-      box(0.9, 0.5, 0.05, 0.2, 0.2, 0.8, '#58707e'),
-    ],
-  },
-  {
-    label: 'Fridge',
-    build: () => [
-      box(0, 0.9, 0, 0.7, 1.8, 0.7, '#e3e7e8'),
-      box(0.28, 1.2, 0.36, 0.04, 0.5, 0.04, '#8a9296'),
-      box(0.28, 0.5, 0.36, 0.04, 0.4, 0.04, '#8a9296'),
-    ],
-  },
-  {
-    label: 'Table',
-    build: () => [
-      box(0, 0.74, 0, 1.4, 0.06, 0.8, '#a0764f'),
-      box(-0.62, 0.36, -0.32, 0.06, 0.72, 0.06, '#7d5a3a'),
-      box(0.62, 0.36, -0.32, 0.06, 0.72, 0.06, '#7d5a3a'),
-      box(-0.62, 0.36, 0.32, 0.06, 0.72, 0.06, '#7d5a3a'),
-      box(0.62, 0.36, 0.32, 0.06, 0.72, 0.06, '#7d5a3a'),
-    ],
-  },
-  {
-    label: 'Bed',
-    build: () => [
-      box(0, 0.25, 0, 1.6, 0.5, 2, '#b9a88f'),
-      box(0, 0.6, 0, 1.55, 0.2, 1.95, '#e8e2d6'),
-      box(0, 0.7, -0.95, 1.6, 0.9, 0.1, '#7d5a3a'),
-    ],
-  },
-  {
-    label: 'Round stool',
-    build: () => [box(0, 0.225, 0, 0.4, 0.45, 0.4, '#a0764f', 'cylinder')],
-  },
-];
+export { OBJECT_PRESETS, type ObjectPreset } from './furniture-templates';
 
 function finite(value: unknown, path: string, min: number, max: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) {
@@ -130,14 +83,15 @@ export function validateParts(value: unknown, path = 'parts'): ObjectPart[] {
   if (!Array.isArray(value) || value.length < 1 || value.length > MAX_PARTS) {
     throw new ObjectValidationError(`${path} must contain 1 to ${MAX_PARTS} parts.`);
   }
-  return value.map((raw, index) => {
+  const parts = value.map((raw, index) => {
     const at = `${path}[${index}]`;
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new ObjectValidationError(`${at} must be an object.`);
     const record = raw as Record<string, unknown>;
     if (typeof record.id !== 'string' || !record.id.trim() || record.id.length > 200) throw new ObjectValidationError(`${at}.id is invalid.`);
     if (record.shape !== 'box' && record.shape !== 'cylinder') throw new ObjectValidationError(`${at}.shape is invalid.`);
     if (typeof record.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(record.color)) throw new ObjectValidationError(`${at}.color is invalid.`);
-    return {
+    if (record.parentId !== undefined && (typeof record.parentId !== 'string' || record.parentId.length > 200)) throw new ObjectValidationError(`${at}.parentId is invalid.`);
+    const part: ObjectPart = {
       id: record.id,
       shape: record.shape,
       xMeters: finite(record.xMeters, `${at}.xMeters`, -100, 100),
@@ -148,6 +102,100 @@ export function validateParts(value: unknown, path = 'parts'): ObjectPart[] {
       depthMeters: finite(record.depthMeters, `${at}.depthMeters`, 0.001, 100),
       color: record.color,
     };
+    if (typeof record.parentId === 'string') part.parentId = record.parentId;
+    return part;
+  });
+  const ids = new Set(parts.map((part) => part.id));
+  if (ids.size !== parts.length) throw new ObjectValidationError(`${path} contains duplicate part ids.`);
+  for (const part of parts) {
+    if (part.parentId !== undefined && (!ids.has(part.parentId) || part.parentId === part.id)) delete part.parentId;
+  }
+  // Break any attachment cycles so propagation always terminates.
+  for (const part of parts) {
+    const seen = new Set<string>([part.id]);
+    let current: ObjectPart | undefined = part;
+    while (current?.parentId !== undefined) {
+      if (seen.has(current.parentId)) {
+        delete current.parentId;
+        break;
+      }
+      seen.add(current.parentId);
+      current = parts.find((candidate) => candidate.id === current?.parentId);
+    }
+  }
+  return parts;
+}
+
+export type PartGeometry = Partial<Pick<ObjectPart, 'xMeters' | 'yMeters' | 'zMeters' | 'widthMeters' | 'heightMeters' | 'depthMeters'>>;
+
+/** Keeps a child's offset along one axis: proportional while inside the parent's extent, a fixed gap from the face when outside it. */
+function reanchor(child: number, oldCenter: number, oldHalf: number, newCenter: number, newHalf: number): number {
+  const offset = child - oldCenter;
+  const distance = Math.abs(offset);
+  if (oldHalf > 0 && distance <= oldHalf) return newCenter + offset * (newHalf / oldHalf);
+  return newCenter + (Math.sign(offset) || 1) * (newHalf + distance - oldHalf);
+}
+
+function followParent(parts: ObjectPart[], before: ObjectPart, after: ObjectPart, visited: Set<string>): void {
+  for (const child of parts) {
+    if (child.parentId !== after.id || visited.has(child.id)) continue;
+    visited.add(child.id);
+    const childBefore = { ...child };
+    child.xMeters = reanchor(child.xMeters, before.xMeters, before.widthMeters / 2, after.xMeters, after.widthMeters / 2);
+    child.yMeters = reanchor(child.yMeters, before.yMeters, before.heightMeters / 2, after.yMeters, after.heightMeters / 2);
+    child.zMeters = reanchor(child.zMeters, before.zMeters, before.depthMeters / 2, after.zMeters, after.depthMeters / 2);
+    followParent(parts, childBefore, child, visited);
+  }
+}
+
+/** Moves or resizes a part; everything attached to it (directly or indirectly) stays stuck to it. */
+export function applyPartChange(parts: ObjectPart[], id: string, changes: PartGeometry): void {
+  const part = parts.find((candidate) => candidate.id === id);
+  if (!part) return;
+  const before = { ...part };
+  Object.assign(part, changes);
+  followParent(parts, before, part, new Set([id]));
+}
+
+/** Scales the whole object to new overall dimensions; parts keep their relative positions so joints stay closed. */
+export function scaleParts(parts: ObjectPart[], size: { widthMeters?: number; heightMeters?: number; depthMeters?: number }): void {
+  const bounds = partBounds(parts);
+  const fx = size.widthMeters && bounds.widthMeters > 0 ? size.widthMeters / bounds.widthMeters : 1;
+  const fy = size.heightMeters && bounds.heightMeters > 0 ? size.heightMeters / bounds.heightMeters : 1;
+  const fz = size.depthMeters && bounds.depthMeters > 0 ? size.depthMeters / bounds.depthMeters : 1;
+  for (const part of parts) {
+    part.xMeters = bounds.min.x + (part.xMeters - bounds.min.x) * fx;
+    part.yMeters = bounds.min.y + (part.yMeters - bounds.min.y) * fy;
+    part.zMeters = bounds.min.z + (part.zMeters - bounds.min.z) * fz;
+    part.widthMeters *= fx;
+    part.heightMeters *= fy;
+    part.depthMeters *= fz;
+  }
+}
+
+/** Ids of every part attached, directly or indirectly, to the given part. */
+export function descendantIds(parts: ObjectPart[], id: string): Set<string> {
+  const result = new Set<string>();
+  const queue = [id];
+  while (queue.length) {
+    const current = queue.pop();
+    for (const part of parts) {
+      if (part.parentId === current && !result.has(part.id)) {
+        result.add(part.id);
+        queue.push(part.id);
+      }
+    }
+  }
+  return result;
+}
+
+/** Copies parts with fresh ids, preserving attachments. */
+export function cloneParts(parts: ObjectPart[]): ObjectPart[] {
+  const ids = new Map(parts.map((part) => [part.id, createId()]));
+  return parts.map((part) => {
+    const copy: ObjectPart = { ...part, id: ids.get(part.id) ?? createId() };
+    if (part.parentId !== undefined) copy.parentId = ids.get(part.parentId);
+    return copy;
   });
 }
 
