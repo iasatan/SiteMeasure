@@ -35,6 +35,33 @@ describe('floor plan editor', () => {
     expect(loop(editor)).toEqual([[1, 0, 3, 0], [3, 0, 3, 4], [3, 4, 1, 4], [1, 4, 1, 0]]);
   });
 
+  it('opens distance editors on double-click targets', () => {
+    const calls: string[] = [];
+    const room = createRoom();
+    room.walls = [{ id: 'wall-1', start: { xMeters: 0, yMeters: 0 }, end: { xMeters: 4, yMeters: 0 }, thicknessMeters: 0.15 }];
+    room.doors = [{ id: 'door-1', wallId: 'wall-1', offsetMeters: 1, widthMeters: 0.9 }];
+    room.objects = [{ id: 'object-1', name: 'Cabinet', widthMeters: 1, depthMeters: 0.6, heightMeters: 0.9, xMeters: 1, yMeters: 1 }];
+    const editor = new FloorPlanEditor({
+      room,
+      units: 'metric',
+      onChange: () => {},
+      onSelection: () => {},
+      onMeasure: (wall) => calls.push(`wall:${wall.id}`),
+      onMeasureObject: (id) => calls.push(`object:${id}`),
+      onOpening: (kind, id) => calls.push(`${kind}:${id}`),
+    });
+
+    for (const [selector, expected] of [
+      ['[data-wall-id="wall-1"]', 'wall:wall-1'],
+      ['[data-opening-id="door-1"]', 'door:door-1'],
+      ['[data-object-id="object-1"]', 'object:object-1'],
+    ]) {
+      const target = editor.element.querySelector<SVGElement>(selector);
+      target?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+      expect(calls).toContain(expected);
+    }
+  });
+
   it('keeps neighbours attached when a wall is dragged', () => {
     const editor = rectangleEditor();
     editor.selection = { type: 'wall', id: 'w0' };

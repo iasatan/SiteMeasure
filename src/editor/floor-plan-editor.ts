@@ -55,6 +55,10 @@ export class FloorPlanEditor {
   private originalViewBox: ViewBox | null = null;
   private pinchDistance = 0;
   private pinchStartViewBox: ViewBox | null = null;
+  private doubleClickSelection: EditorSelection = null;
+  private lastPointerUpAt = 0;
+  private lastPointerSelection: EditorSelection = null;
+  private lastHandledDoubleClickAt = 0;
   private viewBox: ViewBox = { x: -1, y: -1, width: 14, height: 11 };
   private readonly undoStack: Room[] = [];
   private redoStack: Room[] = [];
@@ -377,8 +381,35 @@ export class FloorPlanEditor {
     this.svg.addEventListener('pointercancel', (event) => this.pointerUp(event));
     this.svg.addEventListener('dblclick', (event) => {
       event.preventDefault();
-      this.fitSelection();
+      if (performance.now() - this.lastHandledDoubleClickAt < 500) return;
+      const target = (event.target as Element).closest<SVGElement>('[data-wall-id], [data-opening-id], [data-object-id], [data-room-id]');
+      this.handleDoubleClick(target, this.doubleClickSelection);
     });
+  }
+
+  private handleDoubleClick(target: SVGElement | null, fallback: EditorSelection = null): void {
+    if (target?.dataset.openingId && (target.dataset.openingType === 'door' || target.dataset.openingType === 'window')) {
+      fallback = { type: target.dataset.openingType, id: target.dataset.openingId };
+    } else if (target?.dataset.wallId) fallback = { type: 'wall', id: target.dataset.wallId };
+    else if (target?.dataset.objectId) fallback = { type: 'object', id: target.dataset.objectId };
+    if (fallback?.type === 'door' || fallback?.type === 'window') {
+      this.select(fallback);
+      this.onOpening?.(fallback.type, fallback.id);
+      return;
+    }
+    if (fallback?.type === 'wall') {
+      const wall = this.room.walls.find((candidate) => candidate.id === fallback.id);
+      if (!wall) return;
+      this.select(fallback);
+      this.onMeasure?.(structuredClone(wall));
+      return;
+    }
+    if (fallback?.type === 'object') {
+      this.select(fallback);
+      this.onMeasureObject?.(fallback.id);
+      return;
+    }
+    this.fitSelection();
   }
 
   private pointerDown(event: PointerEvent): void {
@@ -399,6 +430,13 @@ export class FloorPlanEditor {
     }
 
     const target = (event.target as Element).closest<SVGElement>('[data-wall-id], [data-opening-id], [data-object-id], [data-room-id]');
+    this.doubleClickSelection = target?.dataset.openingId && (target.dataset.openingType === 'door' || target.dataset.openingType === 'window')
+      ? { type: target.dataset.openingType, id: target.dataset.openingId }
+      : target?.dataset.wallId
+        ? { type: 'wall', id: target.dataset.wallId }
+        : target?.dataset.objectId
+          ? { type: 'object', id: target.dataset.objectId }
+          : null;
     if (this.handleToolPointer(world, target)) return;
     this.handleSelectionPointer(world, target);
   }
@@ -557,6 +595,18 @@ export class FloorPlanEditor {
         this.undoStack.push(this.originalRoom);
         this.redoStack = [];
         this.onChange(structuredClone(this.room), true);
+      } else if (this.doubleClickSelection) {
+        const now = performance.now();
+        const sameSelection = this.lastPointerSelection?.type === this.doubleClickSelection.type && this.lastPointerSelection.id === this.doubleClickSelection.id;
+        if (sameSelection && now - this.lastPointerUpAt < 450) {
+          this.lastPointerUpAt = 0;
+          this.lastPointerSelection = null;
+          this.lastHandledDoubleClickAt = now;
+          this.handleDoubleClick(null, this.doubleClickSelection);
+        } else {
+          this.lastPointerUpAt = now;
+          this.lastPointerSelection = structuredClone(this.doubleClickSelection);
+        }
       }
     }
     this.dragOrigin = null;
