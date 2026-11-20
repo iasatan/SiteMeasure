@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Room } from '../domain/models';
 import { roomHeight } from '../geometry';
+import { buildPartsGroup } from '../objects/object-preview';
 import { escapeHtml } from './project-exports';
 
 export interface RoomVisualizationPhoto {
@@ -91,6 +92,12 @@ function createRoomScene(room: Room): THREE.Scene {
 
   for (const wall of room.walls) addWall(scene, room, wall.id, wall.start, wall.end, wall.thicknessMeters, height, offsetX, offsetZ, wallMaterial, trimMaterial);
   for (const object of room.objects) {
+    if (object.parts?.length) {
+      const group = buildPartsGroup(object.parts, object);
+      group.position.set((object.xMeters ?? offsetX) - offsetX, 0, (object.yMeters ?? offsetZ) - offsetZ);
+      scene.add(group);
+      continue;
+    }
     const material = new THREE.MeshStandardMaterial({ color: 0x5c8175, roughness: 0.62 });
     addBox(scene, object.widthMeters, object.heightMeters, object.depthMeters, (object.xMeters ?? offsetX) - offsetX, object.heightMeters / 2, (object.yMeters ?? offsetZ) - offsetZ, material);
   }
