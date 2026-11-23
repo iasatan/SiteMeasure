@@ -37,7 +37,7 @@ export class BoschLaserMeasureAdapter implements LaserMeasureAdapter {
 
       onState('searching');
       const device = await this.provider.requestDevice({
-        filters: this.profiles.map((profile) => ({ services: [profile.serviceUuid], namePrefix: profile.namePrefixes[0] })),
+        filters: this.profiles.map((profile) => ({ namePrefix: profile.namePrefixes[0] })),
         optionalServices: this.profiles.map((profile) => profile.serviceUuid),
       });
       const profile = this.profiles.find((candidate) => candidate.namePrefixes.some((prefix) => device.name?.startsWith(prefix)));
