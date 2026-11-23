@@ -48,10 +48,14 @@ export class BoschLaserMeasureAdapter implements LaserMeasureAdapter {
       const service = await server.getPrimaryService(profile.serviceUuid);
       const characteristic = await service.getCharacteristic(profile.measurementCharacteristicUuid);
       this.characteristic = await characteristic.startNotifications();
-      this.notificationHandler = () => {
+      this.notificationHandler = (event) => {
         const receivedAt = new Date().toISOString();
-        const value = this.characteristic?.value;
-        if (!value) return;
+        const eventCharacteristic = event.target as BluetoothCharacteristicLike | null;
+        const value = eventCharacteristic?.value ?? this.characteristic?.value;
+        if (!value) {
+          onState('connected', 'Notification received, but iOSWebBLE did not expose a measurement payload.');
+          return;
+        }
         onState('receiving');
         const parsed = profile.parseMeasurement(value, { deviceName: this.deviceName ?? profile.displayName, receivedAt });
         if (parsed) {
