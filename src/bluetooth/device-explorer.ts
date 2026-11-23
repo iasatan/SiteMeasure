@@ -22,7 +22,7 @@ interface ExplorerServer {
   getPrimaryServices(): Promise<ExplorerService[]>;
 }
 
-type ExplorerDevice = BluetoothDeviceLike & {
+type ExplorerDevice = Omit<BluetoothDeviceLike, 'gatt'> & {
   gatt?: ExplorerServer;
   watchAdvertisements?(): Promise<void>;
 };
