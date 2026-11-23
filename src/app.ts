@@ -609,6 +609,34 @@ export class SiteMeasureApp {
     panel.append(connectionActions);
     panel.append(button('Configure device', 'button quiet stretch', () => this.showBluetoothSettingsDialog()));
 
+    if (this.view === 'measure') {
+      const testField = document.createElement('label');
+      testField.className = 'field';
+      const factor = project.preferredUnits === 'imperial' ? 3.280839895 : 1;
+      const testInput = document.createElement('input');
+      testInput.type = 'text';
+      testInput.inputMode = 'decimal';
+      testInput.placeholder = project.preferredUnits === 'imperial' ? '6.56' : '2.00';
+      testInput.addEventListener('input', () => testInput.setCustomValidity(''));
+      testField.append(element('span', 'field-label', `Test measurement in ${project.preferredUnits === 'imperial' ? 'feet' : 'meters'}`), testInput);
+      panel.append(testField, button('Add test measurement', 'button quiet stretch', () => {
+        const meters = parseDecimalInput(testInput.value) / factor;
+        if (!Number.isFinite(meters) || meters <= 0) {
+          testInput.setCustomValidity('Enter a measurement greater than zero.');
+          testInput.reportValidity();
+          return;
+        }
+        this.bluetoothCapture.receive({
+          valueMeters: meters,
+          capturedAt: new Date().toISOString(),
+          deviceName: 'Manual test input',
+          simulated: true,
+        });
+        this.showToast('Test measurement received');
+        this.refreshBluetoothSurfaces();
+      }));
+    }
+
     const captures = this.bluetoothCapture.list();
     if (captures.length) {
       const queue = element('div', 'capture-queue');
