@@ -10,6 +10,7 @@ export interface BluetoothCharacteristicLike extends EventTarget {
   readonly value: DataView | null;
   readonly uuid: string;
   startNotifications(): Promise<BluetoothCharacteristicLike>;
+  readValue?(): Promise<DataView>;
   writeValue?(value: BufferSource): Promise<void>;
 }
 
@@ -64,5 +65,6 @@ export interface LaserMeasureAdapter {
   readonly providerId: BluetoothProvider['id'] | 'fake';
   readonly deviceName: string | null;
   connect(onMeasurement: (measurement: ParsedMeasurement) => void, onState: (state: BluetoothConnectionState, detail?: string) => void): Promise<void>;
+  readCurrentMeasurement?(): Promise<void>;
   disconnect(): Promise<void>;
 }

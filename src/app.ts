@@ -603,6 +603,14 @@ export class SiteMeasureApp {
     if (this.bluetoothAdapter) {
       connectionActions.append(button('Disconnect', 'button quiet stretch', () => { void this.disconnectLaserMeasure(); }));
     }
+    if (this.bluetoothAdapter?.readCurrentMeasurement && this.bluetoothState === 'connected') {
+      connectionActions.append(button('Read current measurement', 'button quiet stretch', () => {
+        void this.bluetoothAdapter?.readCurrentMeasurement?.().catch((error: unknown) => {
+          this.bluetoothDetail = error instanceof Error ? error.message : 'The current measurement could not be read.';
+          this.refreshBluetoothSurfaces();
+        });
+      }));
+    }
     if (this.bluetoothAdapter instanceof FakeLaserMeasureAdapter && this.bluetoothState === 'connected') {
       connectionActions.append(button('Receive simulated value', 'button quiet stretch', () => this.bluetoothAdapter instanceof FakeLaserMeasureAdapter && this.bluetoothAdapter.emitDemoMeasurement()));
     }
