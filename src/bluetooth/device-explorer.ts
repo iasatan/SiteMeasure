@@ -116,7 +116,7 @@ export class DeviceExplorer {
       }
     }
     if (!device.gatt) throw new Error('Device did not expose GATT.');
-    const server = await device.gatt.connect();
+    const server = (await device.gatt.connect()) as unknown as ExplorerServer;
     this.log('GATT connected.');
     await this.discover(server);
   }
