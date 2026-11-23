@@ -8,6 +8,7 @@ import { FloorPlanEditor, type EditorSelection } from './editor/floor-plan-edito
 import { deriveOpeningSegments, distanceBetween, formatLength, openingArea, polygonIssues, roomArea, roomHeight, roomVolume, wallArea, type OpeningSegmentKey } from './geometry';
 import { BoschLaserMeasureAdapter } from './bluetooth/bosch-laser-measure-adapter';
 import { clearCustomBoschProfile, loadCustomBoschProfile, loadCustomBoschProfileSettings, saveCustomBoschProfile, type BoschPayloadFormat } from './bluetooth/custom-bosch-profile';
+import { DeviceExplorer, loadExtraServices, saveExtraServices } from './bluetooth/device-explorer';
 import { FakeLaserMeasureAdapter } from './bluetooth/fake-laser-measure-adapter';
 import { MeasurementCapture } from './bluetooth/measurement-capture';
 import { selectBluetoothProvider } from './bluetooth/providers/select-bluetooth-provider';
@@ -42,6 +43,8 @@ export class SiteMeasureApp {
   private bluetoothAdapter: LaserMeasureAdapter | null = null;
   private bluetoothState: BluetoothConnectionState = 'ready';
   private bluetoothDetail = '';
+  private deviceExplorer: DeviceExplorer | null = null;
+  private explorerLog: string[] = [];
   private measurementPanelContext: { project: Project; room: Room; wall: Project['buildings'][number]['floors'][number]['rooms'][number]['walls'][number] } | null = null;
   private readonly objectsPage = new ObjectsPage(new ObjectLibrary(localStorage), {
     projects: () => this.repository.list().map((summary) => ({ id: summary.id, name: summary.name })),
@@ -616,6 +619,7 @@ export class SiteMeasureApp {
     }
     panel.append(connectionActions);
     panel.append(button('Configure device', 'button quiet stretch', () => this.showBluetoothSettingsDialog()));
+    panel.append(button('Explore device (all services & events)', 'button quiet stretch', () => this.showDeviceExplorerDialog()));
 
     if (this.view === 'measure') {
       const testField = document.createElement('label');
@@ -706,6 +710,51 @@ export class SiteMeasureApp {
     else this.bluetoothState = this.bluetoothProvider.label === 'iOSWebBLE required' ? 'extension-required' : 'not-available';
     this.bluetoothDetail = '';
     if (refresh) this.refreshBluetoothSurfaces();
+  }
+
+  private showDeviceExplorerDialog(): void {
+    const dialog = this.dialog();
+    const content = element('div', 'dialog-content');
+    content.append(element('p', 'eyebrow', 'Bluetooth diagnostics'), element('h2', 'dialog-title', 'Explore device'));
+    content.append(element('p', 'bluetooth-help', 'Pick any nearby device. Every service, characteristic and descriptor is listed, readable values are read, and all notifications/indications are subscribed with decoded payloads logged below. Browsers only expose services declared up front, so add custom service UUIDs if yours is missing.'));
+    const wrapper = document.createElement('label');
+    wrapper.className = 'field';
+    const extra = document.createElement('input');
+    extra.type = 'text';
+    extra.autocomplete = 'off';
+    extra.placeholder = 'Extra service UUIDs, comma separated';
+    extra.value = loadExtraServices(localStorage);
+    wrapper.append(element('span', 'field-label', 'Additional service UUIDs'), extra);
+    const output = document.createElement('pre');
+    output.className = 'bluetooth-log';
+    output.style.cssText = 'max-height:40vh;overflow:auto;white-space:pre-wrap;word-break:break-all;font-size:11px;user-select:text';
+    output.textContent = this.explorerLog.join('\n');
+    const append = (line: string) => {
+      this.explorerLog.push(`${new Date().toISOString().slice(11, 23)} ${line}`);
+      output.textContent = this.explorerLog.join('\n');
+      output.scrollTop = output.scrollHeight;
+    };
+    const stop = () => {
+      this.deviceExplorer?.disconnect();
+      this.deviceExplorer = null;
+    };
+    const actions = element('div', 'dialog-actions stacked');
+    actions.append(button('Scan & connect', 'button primary', () => {
+      stop();
+      saveExtraServices(localStorage, extra.value);
+      const explorer = new DeviceExplorer(this.bluetoothProvider, append, () => { this.deviceExplorer = null; });
+      this.deviceExplorer = explorer;
+      void explorer.start(extra.value).then(() => append('Discovery complete. Trigger a measurement on the device now.'), (error: unknown) => append(`ERROR ${error instanceof Error ? error.message : String(error)}`));
+    }));
+    actions.append(button('Copy log', 'button quiet', () => {
+      void navigator.clipboard?.writeText(this.explorerLog.join('\n')).then(() => this.showToast('Log copied'), () => this.showToast('Copy failed'));
+    }));
+    actions.append(button('Clear log', 'button quiet', () => { this.explorerLog = []; output.textContent = ''; }));
+    actions.append(button('Disconnect', 'button quiet', () => { stop(); append('Disconnected by user.'); }));
+    actions.append(button('Close', 'button quiet', () => dialog.close()));
+    content.append(wrapper, actions, output);
+    dialog.replaceChildren(content);
+    this.openDialog(dialog);
   }
 
   private showBluetoothSettingsDialog(): void {
