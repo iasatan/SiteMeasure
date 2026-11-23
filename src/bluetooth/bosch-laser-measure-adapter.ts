@@ -101,17 +101,18 @@ export class BoschLaserMeasureAdapter implements LaserMeasureAdapter {
   private handleMeasurementValue(value: DataView): void {
     if (!this.profile || !this.onMeasurement || !this.onState) return;
     const receivedAt = new Date().toISOString();
-    this.onState('receiving');
-    const parsed = this.profile.parseMeasurement(value, { deviceName: this.deviceName ?? this.profile.displayName, receivedAt });
-    if (parsed) {
-      this.onMeasurement(parsed);
-      this.onState('connected');
-      return;
-    }
     const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
     const hex = Array.from(bytes.slice(0, 24), (byte) => byte.toString(16).padStart(2, '0')).join(' ');
     const suffix = bytes.length > 24 ? ' ...' : '';
-    this.onState('connected', `Received ${bytes.length} bytes but the configured payload format could not decode them: ${hex}${suffix}`);
+    const packetDetail = `Received ${bytes.length} bytes: ${hex}${suffix}`;
+    this.onState('receiving', packetDetail);
+    const parsed = this.profile.parseMeasurement(value, { deviceName: this.deviceName ?? this.profile.displayName, receivedAt });
+    if (parsed) {
+      this.onMeasurement(parsed);
+      this.onState('connected', packetDetail);
+      return;
+    }
+    this.onState('connected', `${packetDetail}; the configured payload format could not decode them.`);
   }
 
   async disconnect(): Promise<void> {
