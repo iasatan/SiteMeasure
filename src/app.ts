@@ -18,7 +18,7 @@ import { processPhoto } from './photos/photo-processing';
 import { floorPlanSvg, measurementsCsv, printableReport, svgToPng } from './reports/project-exports';
 import type { RoomVisualizationPhoto } from './reports/room-visualization';
 
-type PrimaryView = 'projects' | 'plan' | 'objects' | 'measure' | 'photos' | 'more';
+type PrimaryView = 'projects' | 'plan' | 'objects' | 'measure' | 'photos' | 'more' | 'ble';
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -171,6 +171,9 @@ export class SiteMeasureApp {
         break;
       case 'more':
         this.renderMore(main);
+        break;
+      case 'ble':
+        this.renderBleExplorer(main);
         break;
     }
     this.renderSaveIndicator();
@@ -619,7 +622,7 @@ export class SiteMeasureApp {
     }
     panel.append(connectionActions);
     panel.append(button('Configure device', 'button quiet stretch', () => this.showBluetoothSettingsDialog()));
-    panel.append(button('Explore device (all services & events)', 'button quiet stretch', () => this.showDeviceExplorerDialog()));
+    panel.append(button('Explore device (all services & events)', 'button quiet stretch', () => this.setView('ble')));
 
     if (this.view === 'measure') {
       const testField = document.createElement('label');
@@ -712,11 +715,10 @@ export class SiteMeasureApp {
     if (refresh) this.refreshBluetoothSurfaces();
   }
 
-  private showDeviceExplorerDialog(): void {
-    const dialog = this.dialog();
-    const content = element('div', 'dialog-content');
-    content.append(element('p', 'eyebrow', 'Bluetooth diagnostics'), element('h2', 'dialog-title', 'Explore device'));
-    content.append(element('p', 'bluetooth-help', 'Pick any nearby device. Every service, characteristic and descriptor is listed, readable values are read, and all notifications/indications are subscribed with decoded payloads logged below. Browsers only expose services declared up front, so add custom service UUIDs if yours is missing.'));
+  private renderBleExplorer(main: HTMLElement): void {
+    const page = element('section', 'page');
+    page.append(element('p', 'eyebrow', 'Bluetooth diagnostics'), element('h1', '', 'BLE explorer'));
+    page.append(element('p', 'bluetooth-help', 'Pick any nearby device. Every service, characteristic and descriptor is listed, readable values are read, and all notifications/indications are subscribed with decoded payloads logged below. Browsers only expose services declared up front, so add custom service UUIDs if yours is missing.'));
     const wrapper = document.createElement('label');
     wrapper.className = 'field';
     const extra = document.createElement('input');
@@ -727,10 +729,11 @@ export class SiteMeasureApp {
     wrapper.append(element('span', 'field-label', 'Additional service UUIDs'), extra);
     const output = document.createElement('pre');
     output.className = 'bluetooth-log';
-    output.style.cssText = 'max-height:40vh;overflow:auto;white-space:pre-wrap;word-break:break-all;font-size:11px;user-select:text';
+    output.style.cssText = 'max-height:50vh;overflow:auto;white-space:pre-wrap;word-break:break-all;font-size:11px;user-select:text';
     output.textContent = this.explorerLog.join('\n');
     const append = (line: string) => {
       this.explorerLog.push(`${new Date().toISOString().slice(11, 23)} ${line}`);
+      if (!output.isConnected) return;
       output.textContent = this.explorerLog.join('\n');
       output.scrollTop = output.scrollHeight;
     };
@@ -738,23 +741,22 @@ export class SiteMeasureApp {
       this.deviceExplorer?.disconnect();
       this.deviceExplorer = null;
     };
-    const actions = element('div', 'dialog-actions stacked');
-    actions.append(button('Scan & connect', 'button primary', () => {
+    const actions = element('div', 'bluetooth-actions');
+    actions.append(button('Scan & connect', 'button primary stretch', () => {
       stop();
       saveExtraServices(localStorage, extra.value);
       const explorer = new DeviceExplorer(this.bluetoothProvider, append, () => { this.deviceExplorer = null; });
       this.deviceExplorer = explorer;
       void explorer.start(extra.value).then(() => append('Discovery complete. Trigger a measurement on the device now.'), (error: unknown) => append(`ERROR ${error instanceof Error ? error.message : String(error)}`));
     }));
-    actions.append(button('Copy log', 'button quiet', () => {
+    actions.append(button('Copy log', 'button quiet stretch', () => {
       void navigator.clipboard?.writeText(this.explorerLog.join('\n')).then(() => this.showToast('Log copied'), () => this.showToast('Copy failed'));
     }));
-    actions.append(button('Clear log', 'button quiet', () => { this.explorerLog = []; output.textContent = ''; }));
-    actions.append(button('Disconnect', 'button quiet', () => { stop(); append('Disconnected by user.'); }));
-    actions.append(button('Close', 'button quiet', () => dialog.close()));
-    content.append(wrapper, actions, output);
-    dialog.replaceChildren(content);
-    this.openDialog(dialog);
+    actions.append(button('Clear log', 'button quiet stretch', () => { this.explorerLog = []; output.textContent = ''; }));
+    actions.append(button('Disconnect', 'button quiet stretch', () => { stop(); append('Disconnected by user.'); }));
+    actions.append(button('Back', 'button quiet stretch', () => { stop(); this.setView('more'); }));
+    page.append(wrapper, actions, output);
+    main.append(page);
   }
 
   private showBluetoothSettingsDialog(): void {
@@ -1151,6 +1153,7 @@ export class SiteMeasureApp {
     bluetooth.append(element('h2', '', 'Bluetooth setup'));
     const configuredProfile = loadCustomBoschProfileSettings(localStorage);
     bluetooth.append(element('p', '', configuredProfile ? `${configuredProfile.displayName} is configured for ${this.bluetoothProvider.label}.` : 'No real-device profile is configured. Simulation remains available.'));
+    bluetooth.append(button('BLE explorer', 'button quiet stretch', () => this.setView('ble')));
     bluetooth.append(button(configuredProfile ? 'Edit device profile' : 'Configure laser measure', 'button quiet stretch', () => this.showBluetoothSettingsDialog()));
     const actions = element('section', 'settings-section');
     actions.append(element('h2', '', 'Project files and reports'));
@@ -1769,7 +1772,7 @@ function formValue(formData: FormData, name: string): string {
 }
 
 function navSymbol(view: PrimaryView): string {
-  return { projects: 'P', plan: '⌜', objects: '▣', measure: '↕', photos: '□', more: '…' }[view];
+  return { projects: 'P', plan: '⌜', objects: '▣', measure: '↕', photos: '□', more: '…', ble: 'B' }[view];
 }
 
 function formatDate(value: string): string {
