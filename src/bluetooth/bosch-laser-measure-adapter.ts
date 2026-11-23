@@ -51,35 +51,41 @@ export class BoschLaserMeasureAdapter implements LaserMeasureAdapter {
       this.onState = onState;
       this.profile = profile;
       const server = await device.gatt.connect();
-      const service = await server.getPrimaryService(profile.serviceUuid);
-      const characteristic = await service.getCharacteristic(profile.measurementCharacteristicUuid);
-      this.characteristic = await characteristic.startNotifications();
+      let service;
+      try {
+        service = await server.getPrimaryService(profile.serviceUuid);
+      } catch (error) {
+        throw new Error(`GATT service ${profile.serviceUuid} could not be opened: ${error instanceof Error ? error.message : 'unknown error'}`);
+      }
+      let characteristic: BluetoothCharacteristicLike;
+      try {
+        characteristic = await service.getCharacteristic(profile.measurementCharacteristicUuid);
+      } catch (error) {
+        throw new Error(`GATT characteristic ${profile.measurementCharacteristicUuid} could not be opened: ${error instanceof Error ? error.message : 'unknown error'}`);
+      }
+      let notificationWarning = '';
+      try {
+        this.characteristic = await characteristic.startNotifications();
+      } catch (error) {
+        if (!characteristic.readValue) throw new Error(`GATT notifications could not be started: ${error instanceof Error ? error.message : 'unknown error'}`);
+        this.characteristic = characteristic;
+        notificationWarning = `Notifications unavailable; use Read current measurement. ${error instanceof Error ? error.message : ''}`.trim();
+      }
       this.notificationHandler = (event) => {
-        const receivedAt = new Date().toISOString();
         const eventCharacteristic = event.target as BluetoothCharacteristicLike | null;
         const value = eventCharacteristic?.value ?? this.characteristic?.value;
         if (!value) {
           onState('connected', 'Notification received, but iOSWebBLE did not expose a measurement payload.');
           return;
         }
-        onState('receiving');
-        const parsed = profile.parseMeasurement(value, { deviceName: this.deviceName ?? profile.displayName, receivedAt });
-        if (parsed) {
-          onMeasurement(parsed);
-          onState('connected');
-          return;
-        }
-        const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
-        const hex = Array.from(bytes.slice(0, 24), (byte) => byte.toString(16).padStart(2, '0')).join(' ');
-        const suffix = bytes.length > 24 ? ' ...' : '';
-        onState('connected', `Received ${bytes.length} bytes but the configured payload format could not decode them: ${hex}${suffix}`);
+        this.handleMeasurementValue(value);
       };
       this.characteristic.addEventListener('characteristicvaluechanged', this.notificationHandler);
       device.addEventListener('gattserverdisconnected', () => {
         onState('disconnected');
         this.deviceName = null;
       }, { once: true });
-      onState('connected');
+      onState('connected', notificationWarning);
     } catch (error) {
       onState('error', error instanceof Error ? error.message : 'The laser measure could not be connected.');
       throw error;
