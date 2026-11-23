@@ -50,11 +50,19 @@ export class BoschLaserMeasureAdapter implements LaserMeasureAdapter {
       this.characteristic = await characteristic.startNotifications();
       this.notificationHandler = () => {
         const receivedAt = new Date().toISOString();
-        if (!this.characteristic?.value) return;
+        const value = this.characteristic?.value;
+        if (!value) return;
         onState('receiving');
-        const parsed = profile.parseMeasurement(this.characteristic.value, { deviceName: this.deviceName ?? profile.displayName, receivedAt });
-        if (parsed) onMeasurement(parsed);
-        onState('connected');
+        const parsed = profile.parseMeasurement(value, { deviceName: this.deviceName ?? profile.displayName, receivedAt });
+        if (parsed) {
+          onMeasurement(parsed);
+          onState('connected');
+          return;
+        }
+        const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+        const hex = Array.from(bytes.slice(0, 24), (byte) => byte.toString(16).padStart(2, '0')).join(' ');
+        const suffix = bytes.length > 24 ? ' ...' : '';
+        onState('connected', `Received ${bytes.length} bytes but the configured payload format could not decode them: ${hex}${suffix}`);
       };
       this.characteristic.addEventListener('characteristicvaluechanged', this.notificationHandler);
       device.addEventListener('gattserverdisconnected', () => {
