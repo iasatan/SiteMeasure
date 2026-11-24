@@ -4,6 +4,8 @@ import type { ParsedMeasurement } from './types';
 
 export const CUSTOM_BOSCH_PROFILE_STORAGE_KEY = 'sitemeasure:custom-bosch-profile';
 const BOSCH_MEASUREMENT_CHARACTERISTIC_UUID = '02a6c0d2-0451-4000-b000-fb3210111989';
+// The GLM exposes this characteristic only under the 0xFDE8 service.
+const BOSCH_MEASUREMENT_SERVICE_UUID = 'fde8';
 
 export type BoschPayloadFormat = 'bosch-glm20' | 'float32-le-m' | 'uint32-le-mm' | 'uint32-le-0.1mm' | 'uint16-le-mm';
 
@@ -32,7 +34,10 @@ export function loadCustomBoschProfileSettings(storage: Storage): CustomBoschPro
   if (!raw) return null;
   try {
     const value = JSON.parse(raw) as CustomBoschProfileSettings;
-    if (value.measurementCharacteristicUuid?.toLowerCase() === BOSCH_MEASUREMENT_CHARACTERISTIC_UUID) value.payloadFormat = 'bosch-glm20';
+    if (value.measurementCharacteristicUuid?.toLowerCase() === BOSCH_MEASUREMENT_CHARACTERISTIC_UUID) {
+      value.payloadFormat = 'bosch-glm20';
+      value.serviceUuid = BOSCH_MEASUREMENT_SERVICE_UUID;
+    }
     createCustomBoschProfile(value);
     return value;
   } catch {
@@ -56,7 +61,7 @@ export function createCustomBoschProfile(value: Partial<CustomBoschProfileSettin
   const settings: CustomBoschProfileSettings = {
     displayName: typeof value.displayName === 'string' ? value.displayName.trim() : '',
     namePrefix: typeof value.namePrefix === 'string' ? value.namePrefix.trim() : '',
-    serviceUuid: typeof value.serviceUuid === 'string' ? value.serviceUuid.trim().toLowerCase() : '',
+    serviceUuid: measurementCharacteristicUuid === BOSCH_MEASUREMENT_CHARACTERISTIC_UUID ? BOSCH_MEASUREMENT_SERVICE_UUID : typeof value.serviceUuid === 'string' ? value.serviceUuid.trim().toLowerCase() : '',
     measurementCharacteristicUuid,
     payloadFormat: measurementCharacteristicUuid === BOSCH_MEASUREMENT_CHARACTERISTIC_UUID ? 'bosch-glm20' : requestedPayloadFormat,
     byteOffset: Number.isInteger(value.byteOffset) && Number(value.byteOffset) >= 0 ? Number(value.byteOffset) : 0,
