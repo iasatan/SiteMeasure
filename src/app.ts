@@ -15,7 +15,6 @@ import type { BluetoothConnectionState, LaserMeasureAdapter } from './bluetooth/
 import { normalizedPoint, renderPhotoAnnotations } from './photos/photo-annotations';
 import { processPhoto } from './photos/photo-processing';
 import { floorPlanSvg, measurementsCsv, printableReport, svgToPng } from './reports/project-exports';
-import type { RoomVisualizationPhoto } from './reports/room-visualization';
 
 type PrimaryView = 'projects' | 'plan' | 'objects' | 'measure' | 'photos' | 'more';
 
@@ -257,7 +256,7 @@ export class SiteMeasureApp {
     const topActions = element('div', 'workspace-actions');
     topActions.append(button('Room', 'button quiet compact', () => this.addRoom(project)));
     topActions.append(button('Floor', 'button quiet compact', () => this.addFloor(project)));
-    topActions.append(button('3D photos', 'button primary compact', () => { void this.showRoomSlideshow(project, active); }));
+    topActions.append(button('3D view', 'button primary compact', () => { void this.showRoomViewer(project, active); }));
     topActions.append(button('Export', 'button quiet compact', () => this.exportProject(project)));
     top.append(identity, topActions);
 
@@ -1469,79 +1468,39 @@ export class SiteMeasureApp {
     this.root.querySelector<HTMLInputElement>('[data-import-input]')?.click();
   }
 
-  private async showRoomSlideshow(project: Project, room: Room): Promise<void> {
+  private async showRoomViewer(project: Project, room: Room): Promise<void> {
     const dialog = this.dialog();
     const loading = element('div', 'dialog-content room-visualization-loading');
-    loading.append(element('p', 'eyebrow', '3D walkthrough'), element('h2', 'dialog-title', `Creating ${room.name}`));
-    loading.append(element('p', '', 'Rendering four measured room views...'));
+    loading.append(element('p', 'eyebrow', '3D room'), element('h2', 'dialog-title', `Creating ${room.name}`));
     dialog.replaceChildren(loading);
     this.openDialog(dialog);
 
     try {
-      const { renderRoomPhotos, roomSlideshowHtml } = await import('./reports/room-visualization');
-      const photos = await renderRoomPhotos(room);
+      const [{ createRoomPreview }, { roomViewerHtml }] = await Promise.all([
+        import('./reports/room-visualization'),
+        import('./reports/room-viewer-export'),
+      ]);
+      if (!dialog.open || !loading.isConnected) return;
       const content = element('div', 'dialog-content room-visualization-dialog');
       content.append(element('p', 'eyebrow', project.name), element('h2', 'dialog-title', `${room.name} in 3D`));
       const stage = element('div', 'room-visualization-stage');
-      const image = document.createElement('img');
-      const caption = element('div', 'room-visualization-caption');
-      const captionTitle = element('strong');
-      const captionCount = element('span');
-      caption.append(captionTitle, captionCount);
-      stage.append(image, caption);
-      let selectedIndex = 0;
-      const showPhoto = (index: number) => {
-        selectedIndex = (index + photos.length) % photos.length;
-        const selected = photos[selectedIndex];
-        image.src = selected.dataUrl;
-        image.alt = `${room.name}, ${selected.label}`;
-        captionTitle.textContent = selected.label;
-        captionCount.textContent = `${selectedIndex + 1} / ${photos.length}`;
-        thumbnailButtons.forEach((thumbnail, thumbnailIndex) => thumbnail.setAttribute('aria-current', thumbnailIndex === selectedIndex ? 'true' : 'false'));
-      };
-      const controls = element('div', 'room-visualization-controls');
-      controls.append(
-        button('Previous', 'button quiet', () => showPhoto(selectedIndex - 1)),
-        button('Next', 'button primary', () => showPhoto(selectedIndex + 1)),
-      );
-      const thumbnails = element('div', 'room-visualization-thumbnails');
-      const thumbnailButtons: HTMLButtonElement[] = photos.map((photo, index) => {
-        const thumbnail = document.createElement('button');
-        thumbnail.type = 'button';
-        thumbnail.className = 'room-visualization-thumbnail';
-        thumbnail.setAttribute('aria-label', `Show ${photo.label}`);
-        const preview = document.createElement('img');
-        preview.src = photo.dataUrl;
-        preview.alt = '';
-        thumbnail.append(preview);
-        thumbnail.addEventListener('click', () => showPhoto(index));
-        thumbnails.append(thumbnail);
-        return thumbnail;
-      });
-      showPhoto(0);
       const actions = element('div', 'dialog-actions room-visualization-actions');
       actions.append(button('Close', 'button quiet', () => dialog.close()));
-      actions.append(button('Download this PNG', 'button quiet', () => this.downloadPhoto(photos[selectedIndex], room)));
-      actions.append(button('Download slideshow', 'button primary', () => {
-        this.downloadText(roomSlideshowHtml(project.name, room.name, photos), `${safeFilename(room.name)}-3d-slideshow.html`, 'text/html');
+      actions.append(button('Download 3D view', 'button primary', () => {
+        this.downloadText(roomViewerHtml(project.name, room), `${safeFilename(room.name)}-3d-view.html`, 'text/html');
       }));
-      content.append(stage, controls, thumbnails, actions);
+      content.append(stage, actions);
       dialog.replaceChildren(content);
+      const preview = createRoomPreview(stage, room);
+      dialog.addEventListener('close', () => preview.dispose(), { once: true });
     } catch (error) {
       const content = element('div', 'dialog-content');
-      content.append(element('p', 'eyebrow', '3D walkthrough'), element('h2', 'dialog-title', 'Could not render room'));
-      content.append(element('p', 'validation-warning', error instanceof Error ? error.message : 'The 3D photos could not be created.'));
+      content.append(element('p', 'eyebrow', '3D room'), element('h2', 'dialog-title', 'Could not render room'));
+      content.append(element('p', 'validation-warning', error instanceof Error ? error.message : 'The 3D room could not be displayed.'));
       content.append(element('div', 'dialog-actions', ''));
       content.lastElementChild?.append(button('Close', 'button primary', () => dialog.close()));
       dialog.replaceChildren(content);
     }
-  }
-
-  private downloadPhoto(photo: RoomVisualizationPhoto, room: Room): void {
-    const link = document.createElement('a');
-    link.href = photo.dataUrl;
-    link.download = `${safeFilename(room.name)}-${safeFilename(photo.label)}.png`;
-    link.click();
   }
 
   private exportProject(project: Project, includePhotos = true): void {

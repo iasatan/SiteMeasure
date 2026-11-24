@@ -2,59 +2,115 @@ import * as THREE from 'three';
 import type { Room } from '../domain/models';
 import { roomHeight } from '../geometry';
 import { buildPartsGroup } from '../objects/object-preview';
-import { escapeHtml } from './project-exports';
 
-export interface RoomVisualizationPhoto {
-  label: string;
-  dataUrl: string;
-}
+export function createRoomPreview(container: HTMLElement, room: Room): { dispose(): void } {
+  if (room.walls.length === 0) throw new Error('Add room walls before viewing the room in 3D.');
 
-const VIEW_LABELS = ['Front corner', 'Side corner', 'Rear corner', 'Elevated plan'];
-
-export async function renderRoomPhotos(room: Room): Promise<RoomVisualizationPhoto[]> {
-  if (room.walls.length === 0) throw new Error('Add room walls before creating 3D photos.');
-
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
   const scene = createRoomScene(room);
-  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-  renderer.setPixelRatio(1);
-  renderer.setSize(1200, 800, false);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.setClearColor(0xe5e9e3, 1);
+  renderer.domElement.className = 'room-visualization-canvas';
+  renderer.domElement.setAttribute('aria-label', 'Interactive 3D room view');
+  renderer.domElement.tabIndex = 0;
+  container.append(renderer.domElement);
 
   const bounds = new THREE.Box3().setFromObject(scene);
   const center = bounds.getCenter(new THREE.Vector3());
   const size = bounds.getSize(new THREE.Vector3());
-  const radius = Math.max(size.x, size.z, 2) * 0.92;
-  const height = roomHeight(room);
-  const cameras = [
-    cameraAt(center, radius, radius, radius, 48),
-    cameraAt(center, -radius, radius, radius, 48),
-    cameraAt(center, -radius, radius, -radius, 48),
-    cameraAt(center, 0.01, Math.max(radius * 1.65, height * 2.8), 0.01, 65),
-  ];
+  const radius = Math.max(size.length() / 2, 1);
+  const camera = new THREE.PerspectiveCamera(42, 1, 0.01, Math.max(1000, radius * 100));
+  let yaw = 0.7;
+  let pitch = 1.1;
+  let distance = 0;
+  let frame = 0;
+  let disposed = false;
+  const draw = () => {
+    frame = 0;
+    if (disposed) return;
+    const width = container.clientWidth || 320;
+    const height = container.clientHeight || 240;
+    renderer.setSize(width, height, false);
+    camera.aspect = width / height;
+    if (!distance) {
+      const verticalHalfFov = THREE.MathUtils.degToRad(camera.fov / 2);
+      const horizontalHalfFov = Math.atan(Math.tan(verticalHalfFov) * camera.aspect);
+      distance = radius / Math.sin(Math.min(verticalHalfFov, horizontalHalfFov)) * 1.1;
+    }
+    camera.updateProjectionMatrix();
+    camera.position.set(
+      center.x + distance * Math.cos(pitch) * Math.sin(yaw),
+      center.y + distance * Math.sin(pitch),
+      center.z + distance * Math.cos(pitch) * Math.cos(yaw),
+    );
+    camera.lookAt(center);
+    renderer.render(scene, camera);
+  };
+  const schedule = () => {
+    if (!frame && !disposed) frame = requestAnimationFrame(draw);
+  };
+  const pointers = new Map<number, { x: number; y: number }>();
+  renderer.domElement.addEventListener('pointerdown', (event) => {
+    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    renderer.domElement.setPointerCapture(event.pointerId);
+  });
+  renderer.domElement.addEventListener('pointermove', (event) => {
+    const pointer = pointers.get(event.pointerId);
+    if (!pointer) return;
+    const other = [...pointers.entries()].find(([id]) => id !== event.pointerId)?.[1];
+    if (other) {
+      const previousDistance = Math.hypot(pointer.x - other.x, pointer.y - other.y);
+      const nextDistance = Math.hypot(event.clientX - other.x, event.clientY - other.y);
+      if (previousDistance && nextDistance) distance = Math.max(radius * 0.25, Math.min(radius * 30, distance * previousDistance / nextDistance));
+    } else {
+      yaw -= (event.clientX - pointer.x) * 0.01;
+      pitch = Math.max(0.05, Math.min(1.5, pitch + (event.clientY - pointer.y) * 0.01));
+    }
+    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    schedule();
+  });
+  const release = (event: PointerEvent) => { pointers.delete(event.pointerId); };
+  renderer.domElement.addEventListener('pointerup', release);
+  renderer.domElement.addEventListener('pointercancel', release);
+  renderer.domElement.addEventListener('lostpointercapture', release);
+  renderer.domElement.addEventListener('wheel', (event) => {
+    event.preventDefault();
+    distance = Math.max(radius * 0.25, Math.min(radius * 30, distance * (event.deltaY > 0 ? 1.1 : 0.9)));
+    schedule();
+  }, { passive: false });
+  renderer.domElement.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowLeft') yaw += 0.1;
+    else if (event.key === 'ArrowRight') yaw -= 0.1;
+    else if (event.key === 'ArrowUp') pitch = Math.min(1.5, pitch + 0.1);
+    else if (event.key === 'ArrowDown') pitch = Math.max(0.05, pitch - 0.1);
+    else if (event.key === '+' || event.key === '=') distance = Math.max(radius * 0.25, distance * 0.9);
+    else if (event.key === '-') distance = Math.min(radius * 30, distance * 1.1);
+    else return;
+    event.preventDefault();
+    schedule();
+  });
+  const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(schedule);
+  resizeObserver?.observe(container);
+  schedule();
 
-  try {
-    return cameras.map((camera, index) => {
-      renderer.render(scene, camera);
-      return { label: VIEW_LABELS[index], dataUrl: renderer.domElement.toDataURL('image/png') };
-    });
-  } finally {
-    scene.traverse((object) => {
-      if (!(object instanceof THREE.Mesh)) return;
-      object.geometry.dispose();
-      const materials = Array.isArray(object.material) ? object.material : [object.material];
-      materials.forEach((material) => material.dispose());
-    });
-    renderer.dispose();
-  }
-}
-
-export function roomSlideshowHtml(projectName: string, roomName: string, photos: RoomVisualizationPhoto[]): string {
-  const slides = photos.map((photo, index) => `<figure class="slide${index === 0 ? ' active' : ''}"><img src="${photo.dataUrl}" alt="${escapeHtml(roomName)} - ${escapeHtml(photo.label)}"><figcaption><strong>${escapeHtml(photo.label)}</strong><span>${index + 1} / ${photos.length}</span></figcaption></figure>`).join('');
-  const title = `${projectName} - ${roomName} 3D walkthrough`;
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title><style>*{box-sizing:border-box}body{margin:0;min-height:100dvh;display:grid;grid-template-rows:auto 1fr auto;background:#102c26;color:#f4f1e9;font-family:Arial,sans-serif}header{display:flex;align-items:end;justify-content:space-between;gap:16px;padding:22px 4vw}header h1{margin:0;font:500 clamp(1.6rem,5vw,3rem) Georgia,serif}header p{margin:6px 0 0;color:#b8cbc3}.stage{position:relative;display:grid;place-items:center;min-height:0;padding:0 4vw}.slide{display:none;width:min(1200px,100%);margin:0}.slide.active{display:block}.slide img{display:block;width:100%;max-height:72dvh;object-fit:contain;background:#dfe5de}.slide figcaption{display:flex;justify-content:space-between;padding:12px 0;color:#fff;font-size:1rem}.slide figcaption span{color:#b8cbc3}footer{display:flex;justify-content:center;gap:8px;padding:18px 4vw calc(18px + env(safe-area-inset-bottom))}button{min-width:92px;min-height:44px;border:1px solid #6c8178;border-radius:4px;background:#fff;color:#102c26;font:700 .9rem Arial,sans-serif;cursor:pointer}</style></head><body><header><div><h1>${escapeHtml(roomName)}</h1><p>${escapeHtml(projectName)} · 3D room views</p></div><p id="counter">1 / ${photos.length}</p></header><main class="stage">${slides}</main><footer><button id="previous" type="button" aria-label="Previous image">Previous</button><button id="next" type="button" aria-label="Next image">Next</button></footer><script>const slides=[...document.querySelectorAll('.slide')];let current=0;function show(index){slides[current].classList.remove('active');current=(index+slides.length)%slides.length;slides[current].classList.add('active');document.querySelector('#counter').textContent=(current+1)+' / '+slides.length}document.querySelector('#previous').addEventListener('click',()=>show(current-1));document.querySelector('#next').addEventListener('click',()=>show(current+1));addEventListener('keydown',event=>{if(event.key==='ArrowLeft')show(current-1);if(event.key==='ArrowRight')show(current+1)});</script></body></html>`;
+  return {
+    dispose() {
+      disposed = true;
+      if (frame) cancelAnimationFrame(frame);
+      resizeObserver?.disconnect();
+      scene.traverse((object) => {
+        if (!(object instanceof THREE.Mesh)) return;
+        object.geometry.dispose();
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        materials.forEach((material) => material.dispose());
+      });
+      renderer.dispose();
+      renderer.domElement.remove();
+    },
+  };
 }
 
 function createRoomScene(room: Room): THREE.Scene {
@@ -164,11 +220,3 @@ function addBox(scene: THREE.Scene, width: number, height: number, depth: number
   scene.add(mesh);
 }
 
-function cameraAt(center: THREE.Vector3, x: number, y: number, z: number, distanceCompensation: number): THREE.PerspectiveCamera {
-  const camera = new THREE.PerspectiveCamera(42, 3 / 2, 0.05, 200);
-  camera.position.set(center.x + x, center.y + y, center.z + z);
-  camera.lookAt(center.x, center.y * 0.65, center.z);
-  camera.fov = distanceCompensation > 60 ? 48 : 42;
-  camera.updateProjectionMatrix();
-  return camera;
-}

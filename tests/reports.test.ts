@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createProject, createRoom } from '../src/domain/models';
 import { csvCell, floorPlanSvg, measurementsCsv, printableReport } from '../src/reports/project-exports';
-import { roomSlideshowHtml } from '../src/reports/room-visualization';
+import { roomViewerHtml } from '../src/reports/room-viewer-export';
 
 describe('project reports', () => {
   it('escapes CSV and neutralizes spreadsheet formulas', () => {
@@ -27,15 +27,18 @@ describe('project reports', () => {
     expect(svg).toContain('<polygon');
   });
 
-  it('creates a downloadable four-image 3D slideshow', () => {
-    const photos = ['Front', 'Side', 'Rear', 'Plan'].map((label, index) => ({ label, dataUrl: `data:image/png;base64,image-${index}` }));
-    const html = roomSlideshowHtml('House <script>', 'Kitchen & dining', photos);
+  it('creates a self-contained interactive 3D room export', () => {
+    const room = createRoom('Kitchen & dining');
+    room.notes.push('private note');
+    room.objects.push({ id: 'object', name: '</script><script>alert(1)</script>', widthMeters: 1, heightMeters: 1, depthMeters: 1 });
+    const html = roomViewerHtml('House <script>', room);
 
-    expect(html.match(/<figure class="slide/g)).toHaveLength(4);
-    expect(html).toContain("document.querySelector('#previous')");
-    expect(html).toContain("document.querySelector('#next')");
-    expect(html.match(/<script>/g)).toHaveLength(1);
-    expect(html).not.toContain('<script>alert');
+    expect(html).toContain('id="room-viewer"');
+    expect(html).toContain('id="room-data"');
+    expect(html).toContain('pointerdown');
+    expect(html).not.toContain('private note');
+    expect(html).not.toContain('</script><script>alert');
+    expect(html).not.toContain('<img');
     expect(html).toContain('House &lt;script&gt;');
     expect(html).toContain('Kitchen &amp; dining');
   });

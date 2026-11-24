@@ -335,16 +335,9 @@
   .room-visualization-loading { min-height: 220px; display: grid; align-content: center; }
   .room-visualization-dialog { padding-bottom: 16px; }
   .room-visualization-stage { position: relative; aspect-ratio: 3 / 2; overflow: hidden; background: #dfe5de; }
-  .room-visualization-stage > img { width: 100%; height: 100%; object-fit: contain; }
-  .room-visualization-caption { position: absolute; inset: auto 0 0; display: flex; justify-content: space-between; gap: 12px; padding: 11px 13px; background: rgba(10, 30, 25, 0.88); color: #fff; }
-  .room-visualization-caption span { color: #c7d6cf; font-size: 0.78rem; }
-  .room-visualization-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 8px; }
-  .room-visualization-thumbnails { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-top: 12px; }
-  .room-visualization-thumbnail { position: relative; min-height: 0; padding: 2px; border: 2px solid transparent; border-radius: 3px; background: #dfe5de; }
-  .room-visualization-thumbnail[aria-current="true"] { border-color: var(--accent); }
-  .room-visualization-thumbnail img { width: 100%; aspect-ratio: 3 / 2; object-fit: cover; }
+  .room-visualization-canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+  .room-visualization-canvas:active { cursor: grabbing; }
   .room-visualization-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .room-visualization-actions .button:first-child { grid-column: 1 / -1; }
 
   .app-dialog {
     width: min(100% - 20px, 560px);
