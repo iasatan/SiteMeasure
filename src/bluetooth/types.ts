@@ -12,6 +12,7 @@ export interface BluetoothCharacteristicLike extends EventTarget {
   startNotifications(): Promise<BluetoothCharacteristicLike>;
   readValue?(): Promise<DataView>;
   writeValue?(value: BufferSource): Promise<void>;
+  writeValueWithoutResponse?(value: BufferSource): Promise<void>;
 }
 
 export interface BluetoothServiceLike {
