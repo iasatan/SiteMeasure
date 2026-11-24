@@ -785,6 +785,7 @@ export class SiteMeasureApp {
     const payloadFormat = document.createElement('select');
     payloadFormat.className = 'room-selector';
     const formats: Array<[BoschPayloadFormat, string]> = [
+      ['bosch-glm20', 'Bosch GLM logging protocol (20-byte packets)'],
       ['float32-le-m', '32-bit float, little-endian, meters'],
       ['uint32-le-mm', '32-bit unsigned integer, little-endian, millimeters'],
       ['uint32-le-0.1mm', '32-bit unsigned integer, little-endian, 0.1 millimeters'],

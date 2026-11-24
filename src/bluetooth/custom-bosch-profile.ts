@@ -3,8 +3,9 @@ import { validateBoschProfile } from './profiles/bosch-device-profile';
 import type { ParsedMeasurement } from './types';
 
 export const CUSTOM_BOSCH_PROFILE_STORAGE_KEY = 'sitemeasure:custom-bosch-profile';
+const BOSCH_MEASUREMENT_CHARACTERISTIC_UUID = '02a6c0d2-0451-4000-b000-fb3210111989';
 
-export type BoschPayloadFormat = 'float32-le-m' | 'uint32-le-mm' | 'uint32-le-0.1mm' | 'uint16-le-mm';
+export type BoschPayloadFormat = 'bosch-glm20' | 'float32-le-m' | 'uint32-le-mm' | 'uint32-le-0.1mm' | 'uint16-le-mm';
 
 export interface CustomBoschProfileSettings {
   displayName: string;
@@ -31,6 +32,7 @@ export function loadCustomBoschProfileSettings(storage: Storage): CustomBoschPro
   if (!raw) return null;
   try {
     const value = JSON.parse(raw) as CustomBoschProfileSettings;
+    if (value.measurementCharacteristicUuid?.toLowerCase() === BOSCH_MEASUREMENT_CHARACTERISTIC_UUID) value.payloadFormat = 'bosch-glm20';
     createCustomBoschProfile(value);
     return value;
   } catch {
@@ -49,12 +51,14 @@ export function clearCustomBoschProfile(storage: Storage): void {
 }
 
 export function createCustomBoschProfile(value: Partial<CustomBoschProfileSettings>): BoschDeviceProfile {
+  const measurementCharacteristicUuid = typeof value.measurementCharacteristicUuid === 'string' ? value.measurementCharacteristicUuid.trim().toLowerCase() : '';
+  const requestedPayloadFormat = isPayloadFormat(value.payloadFormat) ? value.payloadFormat : 'float32-le-m';
   const settings: CustomBoschProfileSettings = {
     displayName: typeof value.displayName === 'string' ? value.displayName.trim() : '',
     namePrefix: typeof value.namePrefix === 'string' ? value.namePrefix.trim() : '',
     serviceUuid: typeof value.serviceUuid === 'string' ? value.serviceUuid.trim().toLowerCase() : '',
-    measurementCharacteristicUuid: typeof value.measurementCharacteristicUuid === 'string' ? value.measurementCharacteristicUuid.trim().toLowerCase() : '',
-    payloadFormat: isPayloadFormat(value.payloadFormat) ? value.payloadFormat : 'float32-le-m',
+    measurementCharacteristicUuid,
+    payloadFormat: measurementCharacteristicUuid === BOSCH_MEASUREMENT_CHARACTERISTIC_UUID ? 'bosch-glm20' : requestedPayloadFormat,
     byteOffset: Number.isInteger(value.byteOffset) && Number(value.byteOffset) >= 0 ? Number(value.byteOffset) : 0,
   };
   const profile: BoschDeviceProfile = {
@@ -63,6 +67,8 @@ export function createCustomBoschProfile(value: Partial<CustomBoschProfileSettin
     namePrefixes: [settings.namePrefix],
     serviceUuid: settings.serviceUuid,
     measurementCharacteristicUuid: settings.measurementCharacteristicUuid,
+    commandCharacteristicUuid: settings.payloadFormat === 'bosch-glm20' ? settings.measurementCharacteristicUuid : undefined,
+    setupCommand: settings.payloadFormat === 'bosch-glm20' ? new Uint8Array([0xc0, 0x55, 0x02, 0x01, 0x00, 0x1a]) : undefined,
     parseMeasurement: (data, context) => parseConfiguredMeasurement(data, settings, context),
   };
   validateBoschProfile(profile);
@@ -73,6 +79,10 @@ function parseConfiguredMeasurement(value: DataView, settings: CustomBoschProfil
   let meters: number;
   try {
     switch (settings.payloadFormat) {
+      case 'bosch-glm20':
+        if (value.byteLength < 20 || value.getUint8(0) !== 0xc0 || value.getUint8(1) !== 0x55 || value.getUint8(2) !== 0x10) return null;
+        meters = value.getFloat32(7, true);
+        break;
       case 'float32-le-m':
         meters = value.getFloat32(settings.byteOffset, true);
         break;
@@ -94,5 +104,5 @@ function parseConfiguredMeasurement(value: DataView, settings: CustomBoschProfil
 }
 
 function isPayloadFormat(value: unknown): value is BoschPayloadFormat {
-  return value === 'float32-le-m' || value === 'uint32-le-mm' || value === 'uint32-le-0.1mm' || value === 'uint16-le-mm';
+  return value === 'bosch-glm20' || value === 'float32-le-m' || value === 'uint32-le-mm' || value === 'uint32-le-0.1mm' || value === 'uint16-le-mm';
 }

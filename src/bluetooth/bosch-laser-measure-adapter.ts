@@ -81,6 +81,13 @@ export class BoschLaserMeasureAdapter implements LaserMeasureAdapter {
         this.handleMeasurementValue(value);
       };
       this.characteristic.addEventListener('characteristicvaluechanged', this.notificationHandler);
+      if (profile.setupCommand) {
+        const commandCharacteristic = !profile.commandCharacteristicUuid || profile.commandCharacteristicUuid === profile.measurementCharacteristicUuid
+          ? this.characteristic
+          : await service.getCharacteristic(profile.commandCharacteristicUuid);
+        if (!commandCharacteristic.writeValue) throw new Error('The Bosch GLM command characteristic does not support writes.');
+        await commandCharacteristic.writeValue(new Uint8Array(profile.setupCommand));
+      }
       device.addEventListener('gattserverdisconnected', () => {
         onState('disconnected');
         this.deviceName = null;

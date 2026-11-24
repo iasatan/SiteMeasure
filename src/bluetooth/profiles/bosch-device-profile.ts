@@ -7,6 +7,7 @@ export interface BoschDeviceProfile {
   serviceUuid: BluetoothUuidLike;
   measurementCharacteristicUuid: BluetoothUuidLike;
   commandCharacteristicUuid?: BluetoothUuidLike;
+  setupCommand?: Uint8Array;
   protocolVersion?: string;
   parseMeasurement(value: DataView, context: MeasurementParserContext): ParsedMeasurement | null;
 }

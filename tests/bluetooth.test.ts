@@ -58,6 +58,20 @@ describe('custom Bosch profiles', () => {
     expect(profile.parseMeasurement(new DataView(bytes.buffer), { deviceName: 'Bosch GLM', receivedAt: '2026-01-01T00:00:00.000Z' })?.valueMeters).toBeCloseTo(2.45);
   });
 
+  it('decodes a Bosch GLM logging packet current value', () => {
+    const profile = createCustomBoschProfile({
+      displayName: 'Bosch GLM',
+      namePrefix: 'GLM100-',
+      serviceUuid: 'fde8',
+      measurementCharacteristicUuid: '02a6c0d2-0451-4000-b000-fb3210111989',
+      payloadFormat: 'bosch-glm20',
+      byteOffset: 0,
+    });
+    const packet = new Uint8Array([0xc0, 0x55, 0x10, 0x0a, 0x08, 0x6a, 0x00, 0xdc, 0xd7, 0xc1, 0x3f, 0x4e, 0xd1, 0xc1, 0x3f, 0xc6, 0xdc, 0xc1, 0x3f, 0x3c]);
+    expect(profile.parseMeasurement(new DataView(packet.buffer), { deviceName: 'GLM100-test', receivedAt: '2026-01-01T00:00:00.000Z' })?.valueMeters).toBeCloseTo(1.5144, 5);
+    expect(profile.setupCommand).toEqual(new Uint8Array([0xc0, 0x55, 0x02, 0x01, 0x00, 0x1a]));
+  });
+
   it('rejects incomplete device identifiers and UUIDs', () => {
     expect(() => createCustomBoschProfile({ displayName: '', namePrefix: '', serviceUuid: 'TODO', measurementCharacteristicUuid: '' })).toThrow();
   });
