@@ -74,7 +74,7 @@ export class ObjectsPage {
     page.append(heading, this.libraryList(), this.editor());
     main.append(page);
     this.preview ??= createObjectPreview(this.previewHost);
-    if (this.preview) this.preview.setParts(this.draft.parts);
+    if (this.preview) this.preview.setParts(this.draft.parts, this.selectedPartId);
     else this.previewHost.textContent = '3D preview needs WebGL, which is not available here.';
   }
 
@@ -274,7 +274,7 @@ export class ObjectsPage {
 
     const refresh = () => {
       updateDims();
-      this.preview?.setParts(this.draft.parts);
+      this.preview?.setParts(this.draft.parts, this.selectedPartId);
     };
     const grid = el('div', 'object-part-fields');
 

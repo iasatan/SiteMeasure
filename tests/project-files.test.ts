@@ -3,11 +3,31 @@ import { copyImportedProject, parseProjectFile, projectFilename, serializeProjec
 import { createProject } from '../src/domain/models';
 import { ProjectValidationError } from '../src/data/schema';
 import { SiteMeasureApp } from '../src/app';
+import { LocalStorageProjectRepository } from '../src/data/local-storage-repository';
 import type { DebugLog } from '../src/debug-log';
 
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('project files', () => {
+  it('opens a new room ready to draw without replacing the existing room', () => {
+    const project = createProject('New room drawing');
+    const firstRoom = structuredClone(project.buildings[0].floors[0].rooms[0]);
+    const repository = new LocalStorageProjectRepository(localStorage);
+    repository.save(project);
+    const root = document.createElement('div');
+    const app = new SiteMeasureApp(root) as unknown as { openProject(id: string): void };
+    app.openProject(project.id);
+    expect(root.querySelector('[aria-label="Room tool"]')?.classList.contains('is-active')).toBe(true);
+    const newRoom = [...root.querySelectorAll('button')].find((button) => button.textContent === 'New room')!;
+    newRoom.click();
+    expect(root.querySelector('[aria-label="Room tool"]')?.classList.contains('is-active')).toBe(true);
+    const rooms = repository.get(project.id)!.buildings[0].floors[0].rooms;
+    expect(rooms).toHaveLength(2);
+    expect(rooms[0]).toEqual(firstRoom);
+    expect(root.querySelector<HTMLSelectElement>('[aria-label="Current room"]')?.value).toBe(rooms[1].id);
+    repository.delete(project.id);
+  });
+
   it('round-trips a validated project', () => {
     const project = createProject('River & Oak / 12');
     project.buildings[0].floors[0].rooms[0].objects.push({ id: 'socket', name: 'Socket', layer: 'technician', widthMeters: 0.1, depthMeters: 0.1, heightMeters: 0.1, elevationMeters: 0.7, rotationRadians: Math.PI / 2 });

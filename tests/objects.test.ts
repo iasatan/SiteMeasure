@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import * as THREE from 'three';
 import { ObjectLibrary } from '../src/data/object-library';
 import { applyPartChange, cloneParts, createObjectDefinition, OBJECT_PRESETS, ObjectValidationError, parseObjectFile, partBounds, scaleParts, serializeObjects, validateParts } from '../src/domain/furniture';
+import { buildPartsGroup } from '../src/objects/object-preview';
 
 function memoryStorage(): Storage {
   const data = new Map<string, string>();
@@ -48,6 +50,22 @@ describe('object library', () => {
 });
 
 describe('templates and attachments', () => {
+  it('highlights only the selected preview part without changing ordinary object rendering', () => {
+    const parts = OBJECT_PRESETS[0].build();
+    const preview = buildPartsGroup(parts, undefined, parts[1].id);
+    const normal = buildPartsGroup(parts);
+    const selected = preview.children[1] as THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
+    const unselected = preview.children[0] as THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
+    const normalPart = normal.children[1] as THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
+
+    expect(selected.material.emissive.getHex()).toBe(0xffa000);
+    expect(selected.children[0]).toBeInstanceOf(THREE.LineSegments);
+    expect(unselected.material.emissive.getHex()).toBe(0);
+    expect(unselected.children).toHaveLength(0);
+    expect(normalPart.material.emissive.getHex()).toBe(0);
+    expect(normalPart.children).toHaveLength(0);
+  });
+
   it('ships at least 100 valid templates with unique names', () => {
     expect(OBJECT_PRESETS.length).toBeGreaterThanOrEqual(100);
     expect(new Set(OBJECT_PRESETS.map((preset) => preset.label)).size).toBe(OBJECT_PRESETS.length);

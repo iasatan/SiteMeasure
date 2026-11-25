@@ -2,12 +2,14 @@ import * as THREE from 'three';
 import { partBounds, type ObjectPart } from '../domain/furniture';
 
 /** Builds a group whose bounding-box minimum corner sits at the origin, optionally scaled to a target size. */
-export function buildPartsGroup(parts: ObjectPart[], target?: { widthMeters: number; heightMeters: number; depthMeters: number }): THREE.Group {
+export function buildPartsGroup(parts: ObjectPart[], target?: { widthMeters: number; heightMeters: number; depthMeters: number }, selectedPartId?: string | null): THREE.Group {
   const bounds = partBounds(parts);
   const group = new THREE.Group();
   for (const part of parts) {
     const geometry = part.shape === 'cylinder' ? new THREE.CylinderGeometry(0.5, 0.5, 1, 32) : new THREE.BoxGeometry(1, 1, 1);
-    const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: part.color, roughness: 0.65 }));
+    const selected = part.id === selectedPartId;
+    const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: part.color, roughness: 0.65, emissive: selected ? 0xffa000 : 0x000000, emissiveIntensity: 0.4 }));
+    if (selected) mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geometry), new THREE.LineBasicMaterial({ color: 0xff8a00 })));
     mesh.scale.set(part.widthMeters, part.heightMeters, part.depthMeters);
     mesh.position.set(part.xMeters - bounds.min.x, part.yMeters - bounds.min.y, part.zMeters - bounds.min.z);
     mesh.castShadow = true;
@@ -21,7 +23,7 @@ export function buildPartsGroup(parts: ObjectPart[], target?: { widthMeters: num
 }
 
 export interface ObjectPreview {
-  setParts(parts: ObjectPart[]): void;
+  setParts(parts: ObjectPart[], selectedPartId: string | null): void;
   dispose(): void;
 }
 
@@ -102,18 +104,18 @@ export function createObjectPreview(container: HTMLElement): ObjectPreview | nul
   resizeObserver?.observe(container);
 
   return {
-    setParts(parts) {
+    setParts(parts, selectedPartId) {
       if (current) {
         scene.remove(current);
         current.traverse((node) => {
-          if (node instanceof THREE.Mesh) {
+          if (node instanceof THREE.Mesh || node instanceof THREE.LineSegments) {
             node.geometry.dispose();
             (node.material as THREE.Material).dispose();
           }
         });
       }
       const bounds = partBounds(parts);
-      current = buildPartsGroup(parts);
+      current = buildPartsGroup(parts, undefined, selectedPartId);
       // Centre the model on the grid, resting on the floor.
       current.position.set(-bounds.widthMeters / 2, 0, -bounds.depthMeters / 2);
       scene.add(current);

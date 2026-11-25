@@ -274,7 +274,7 @@ export class SiteMeasureApp {
     identity.append(element('p', 'eyebrow', project.projectNumber || 'Active project'), element('h1', '', project.name));
     const topActions = element('div', 'workspace-actions');
     if (this.layer === 'builder') {
-      topActions.append(button('Room', 'button quiet compact', () => this.addRoom(project)));
+      topActions.append(button('New room', 'button quiet compact', () => this.addRoom(project)));
       topActions.append(button('Floor', 'button quiet compact', () => this.addFloor(project)));
     }
     topActions.append(button('3D view', 'button primary compact', () => { void this.showRoomViewer(project, this.activeEditor?.getRoom() ?? active); }));
@@ -296,6 +296,7 @@ export class SiteMeasureApp {
       onMeasureClearance: (id, side) => { const room = this.activeRoom(project); if (room) this.showClearanceDialog(project, room, id, side); },
       onOpening: (kind, id) => this.showOpeningDialog(project, kind, id),
     });
+    if (this.layer === 'builder' && active.walls.length === 0 && active.points.length === 0) this.activeEditor.setTool('room');
     canvas.append(hierarchy, this.activeEditor.element);
 
     const details = element('section', 'workspace-sheet');

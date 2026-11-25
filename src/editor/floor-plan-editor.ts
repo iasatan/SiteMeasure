@@ -54,6 +54,8 @@ export class FloorPlanEditor {
   private selection: EditorSelection = null;
   private readonly measuredClearanceAxes = new Set<'horizontal' | 'vertical'>();
   private drawingPoints: Point[] = [];
+  private draftEnd: Point | null = null;
+  private draftRectangle: Point[] = [];
   private wallStart: Point | null = null;
   private objectStart: Point | null = null;
   private view = 'floor';
@@ -124,6 +126,8 @@ export class FloorPlanEditor {
   setTool(tool: EditorTool): void {
     if (!this.allowedTools().includes(tool)) return;
     this.tool = tool;
+    this.draftEnd = null;
+    this.draftRectangle = [];
     this.wallStart = null;
     this.objectStart = null;
     this.drawingPoints = [];
@@ -486,7 +490,12 @@ export class FloorPlanEditor {
     this.svg.addEventListener('pointerdown', (event) => this.pointerDown(event));
     this.svg.addEventListener('pointermove', (event) => this.pointerMove(event));
     this.svg.addEventListener('pointerup', (event) => this.pointerUp(event));
-    this.svg.addEventListener('pointercancel', (event) => this.pointerUp(event));
+    this.svg.addEventListener('pointercancel', (event) => this.pointerUp(event, true));
+    this.svg.addEventListener('pointerleave', () => {
+      this.draftEnd = null;
+      this.draftRectangle = [];
+      this.renderGeometryOnly();
+    });
     this.svg.addEventListener('dblclick', (event) => {
       event.preventDefault();
       if (performance.now() - this.lastHandledDoubleClickAt < 500) return;
@@ -522,6 +531,7 @@ export class FloorPlanEditor {
   }
 
   private pointerDown(event: PointerEvent): void {
+    if (event.button > 0) return;
     event.preventDefault();
     try {
       this.svg.setPointerCapture(event.pointerId);
@@ -547,6 +557,7 @@ export class FloorPlanEditor {
         : target?.dataset.objectId
           ? { type: 'object', id: target.dataset.objectId }
           : null;
+    if (event.pointerType === 'mouse' && this.tool === 'wall' && this.wallStart) return;
     if (this.handleToolPointer(world, target)) return;
     this.handleSelectionPointer(world, target);
   }
@@ -664,6 +675,17 @@ export class FloorPlanEditor {
   }
 
   private pointerMove(event: PointerEvent): void {
+    if (event.pointerType === 'mouse' && (this.tool === 'wall' || this.tool === 'room')) {
+      this.draftRectangle = this.draggedRoomRectangle(event);
+      const count = this.drawingPoints.length;
+      const from = this.drawingPoints[count - 1];
+      const last = this.room.walls.at(-1);
+      const chained = from && last && distanceBetween(last.end, from) < 1e-9 ? last : null;
+      const previous = this.tool === 'wall' ? chained?.start : this.drawingPoints[count - 2];
+      this.draftEnd = from ? this.constrainRightAngle(this.normalizedPoint(this.pointerWorld(event)), previous, from) : null;
+      this.renderGeometryOnly();
+      return;
+    }
     const pointer = this.pointers.get(event.pointerId);
     if (!pointer) return;
     const world = this.pointerWorld(event);
@@ -673,6 +695,16 @@ export class FloorPlanEditor {
     if (this.handleObjectDrag(world)) return;
     if (this.handleWallDrag(world)) return;
     this.handlePanMove(world);
+  }
+
+  private draggedRoomRectangle(event: PointerEvent): Point[] {
+    const pointer = this.pointers.get(event.pointerId);
+    if (event.pointerType !== 'mouse' || this.tool !== 'room' || this.drawingPoints.length !== 1 || !pointer) return [];
+    if (Math.hypot(event.clientX - pointer.screenX, event.clientY - pointer.screenY) < 4) return [];
+    const start = this.drawingPoints[0];
+    const end = this.normalizedPoint(this.pointerWorld(event));
+    if (Math.abs(end.xMeters - start.xMeters) < 0.1 || Math.abs(end.yMeters - start.yMeters) < 0.1) return [];
+    return [start, { xMeters: end.xMeters, yMeters: start.yMeters }, end, { xMeters: start.xMeters, yMeters: end.yMeters }];
   }
 
   private handlePinchMove(): boolean {
@@ -839,7 +871,22 @@ export class FloorPlanEditor {
     this.updateViewBox();
   }
 
-  private pointerUp(event: PointerEvent): void {
+  private finishDrawingGesture(event: PointerEvent, cancelled: boolean): void {
+    if (cancelled) return;
+    const rectangle = this.draggedRoomRectangle(event);
+    if (rectangle.length) {
+      this.drawingPoints = rectangle;
+      this.finishRoom();
+    }
+    if (this.pointers.has(event.pointerId) && event.pointerType === 'mouse' && this.tool === 'wall') {
+      this.addWallPoint(this.pointerWorld(event));
+    }
+  }
+
+  private pointerUp(event: PointerEvent, cancelled = false): void {
+    this.finishDrawingGesture(event, cancelled);
+    this.draftRectangle = [];
+    this.draftEnd = null;
     this.pointers.delete(event.pointerId);
     if (this.dragOrigin && this.originalRoom) {
       const changed = JSON.stringify(this.room) !== JSON.stringify(this.originalRoom);
@@ -1014,6 +1061,7 @@ export class FloorPlanEditor {
     this.room.doors = [];
     this.room.windows = [];
     this.drawingPoints = [];
+    this.draftEnd = null;
     this.selection = { type: 'room', id: this.room.id };
     this.commitAction();
   }
@@ -1260,6 +1308,8 @@ export class FloorPlanEditor {
       this.objectStart = null;
       this.wallStart = null;
       this.drawingPoints = [];
+      this.draftEnd = null;
+      this.draftRectangle = [];
       this.selection = null;
       this.measuredClearanceAxes.clear();
       this.onSelection(null);
@@ -1474,8 +1524,42 @@ export class FloorPlanEditor {
       }
       this.svg.append(points);
     }
+    this.renderDrawingPreview();
     if (this.wallStart) this.svg.append(this.pointMarker(this.wallStart));
     if (this.objectStart) this.svg.append(this.pointMarker(this.objectStart));
+  }
+
+  private renderDrawingPreview(): void {
+    if (this.draftRectangle.length) {
+      const [start, , end] = this.draftRectangle;
+      const preview = svgElement('g', 'editor-drawing-preview');
+      preview.style.pointerEvents = 'none';
+      const outline = svgElement('polygon', 'editor-draft');
+      outline.setAttribute('points', this.draftRectangle.map((point) => `${point.xMeters},${point.yMeters}`).join(' '));
+      const dimension = svgElement('text', 'editor-dimension');
+      dimension.setAttribute('x', String((start.xMeters + end.xMeters) / 2));
+      dimension.setAttribute('y', String(Math.min(start.yMeters, end.yMeters) - 0.18));
+      dimension.textContent = `~ ${formatLength(Math.abs(end.xMeters - start.xMeters), this.units)} x ${formatLength(Math.abs(end.yMeters - start.yMeters), this.units)}`;
+      preview.append(outline, dimension);
+      this.svg.append(preview);
+      return;
+    }
+    const draftStart = this.drawingPoints.at(-1);
+    if (draftStart && this.draftEnd) {
+      const preview = svgElement('g', 'editor-drawing-preview');
+      preview.style.pointerEvents = 'none';
+      const line = svgElement('line', 'editor-draft');
+      line.setAttribute('x1', String(draftStart.xMeters));
+      line.setAttribute('y1', String(draftStart.yMeters));
+      line.setAttribute('x2', String(this.draftEnd.xMeters));
+      line.setAttribute('y2', String(this.draftEnd.yMeters));
+      const dimension = svgElement('text', 'editor-dimension');
+      dimension.setAttribute('x', String((draftStart.xMeters + this.draftEnd.xMeters) / 2));
+      dimension.setAttribute('y', String((draftStart.yMeters + this.draftEnd.yMeters) / 2 - 0.18));
+      dimension.textContent = `~ ${formatLength(distanceBetween(draftStart, this.draftEnd), this.units)}`;
+      preview.append(line, dimension);
+      this.svg.append(preview);
+    }
   }
 
   private buildWall(wall: Wall): SVGElement[] {

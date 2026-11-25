@@ -27,6 +27,111 @@ function rectangleEditor(): EditorInternals {
 const loop = (editor: EditorInternals) => editor.room.walls.map((wall) => [wall.start.xMeters, wall.start.yMeters, wall.end.xMeters, wall.end.yMeters].map((value) => Math.round(value * 1000) / 1000));
 
 describe('floor plan editor', () => {
+  function mouse(editor: FloorPlanEditor, type: string, x: number, y: number, button = 0): void {
+    const svg = editor.element.querySelector('svg')!;
+    Object.assign(svg, { createSVGPoint: () => ({ x: 0, y: 0 }), getScreenCTM: () => null });
+    const event = new MouseEvent(type, { clientX: x, clientY: y, button, bubbles: true });
+    Object.assign(event, { pointerId: 1, pointerType: 'mouse' });
+    svg.dispatchEvent(event);
+  }
+
+  it('previews approximate mouse dimensions without committing room points', () => {
+    const editor = new FloorPlanEditor({ room: createRoom(), layer: 'builder', units: 'metric', onChange: () => {}, onSelection: () => {} });
+    editor.setTool('room');
+    mouse(editor, 'pointerdown', 0, 0);
+    mouse(editor, 'pointerup', 0, 0);
+    mouse(editor, 'pointermove', 4, 1);
+    const preview = editor.element.querySelector('.editor-drawing-preview')!;
+    expect(preview.querySelector('line')?.getAttribute('y2')).toBe('0');
+    expect(preview.textContent).toContain('~ 4.00 m');
+    expect(editor.getRoom().walls).toHaveLength(0);
+    expect(editor.getRoom().points).toHaveLength(0);
+    editor.setTool('select');
+    expect(editor.element.querySelector('.editor-drawing-preview')).toBeNull();
+  });
+
+  it('draws a complete rectangular room by dragging and supports undo', () => {
+    const changes: ReturnType<typeof createRoom>[] = [];
+    const editor = new FloorPlanEditor({ room: createRoom(), layer: 'builder', units: 'metric', onChange: (room) => changes.push(room), onSelection: () => {} });
+    editor.setTool('room');
+    mouse(editor, 'pointerdown', 0, 0);
+    mouse(editor, 'pointermove', 4, 3);
+    expect(editor.element.querySelector('.editor-drawing-preview polygon')).not.toBeNull();
+    expect(editor.element.querySelector('.editor-drawing-preview')?.textContent).toBe('~ 4.00 m x 3.00 m');
+    expect(changes).toHaveLength(0);
+    mouse(editor, 'pointerup', 4, 3);
+    expect(editor.getRoom().points).toEqual([{ xMeters: 0, yMeters: 0 }, { xMeters: 4, yMeters: 0 }, { xMeters: 4, yMeters: 3 }, { xMeters: 0, yMeters: 3 }]);
+    expect(editor.getRoom().walls).toHaveLength(4);
+    expect(changes).toHaveLength(1);
+    expect(editor.element.querySelector('.editor-drawing-preview')).toBeNull();
+    editor.undo();
+    expect(editor.getRoom().walls).toHaveLength(0);
+    editor.redo();
+    expect(editor.getRoom().walls).toHaveLength(4);
+  });
+
+  it('still draws a room by clicking individual corners', () => {
+    const editor = new FloorPlanEditor({ room: createRoom(), layer: 'builder', units: 'metric', onChange: () => {}, onSelection: () => {} });
+    editor.setTool('room');
+    for (const [x, y] of [[0, 0], [4, 0], [4, 3], [0, 3], [0, 0]]) {
+      mouse(editor, 'pointerdown', x, y);
+      mouse(editor, 'pointerup', x, y);
+    }
+    expect(editor.getRoom().walls).toHaveLength(4);
+    expect(editor.element.querySelector('.editor-summary')?.textContent).toBe('12.00 m² plan');
+  });
+
+  it('does not save a cancelled room drag', () => {
+    const editor = new FloorPlanEditor({ room: createRoom(), layer: 'builder', units: 'metric', onChange: () => {}, onSelection: () => {} });
+    editor.setTool('room');
+    mouse(editor, 'pointerdown', 0, 0);
+    mouse(editor, 'pointermove', 4, 3);
+    mouse(editor, 'pointercancel', 4, 3);
+    expect(editor.getRoom().walls).toHaveLength(0);
+    expect(editor.element.querySelector('.editor-drawing-preview')).toBeNull();
+  });
+
+  it('draws approximate walls by mouse dragging or clicking and supports undo', () => {
+    const changes: ReturnType<typeof createRoom>[] = [];
+    const editor = new FloorPlanEditor({ room: createRoom(), layer: 'builder', units: 'metric', onChange: (room) => changes.push(room), onSelection: () => {} });
+    editor.setTool('wall');
+    mouse(editor, 'pointerdown', 0, 0);
+    mouse(editor, 'pointermove', 4, 1);
+    expect(changes).toHaveLength(0);
+    mouse(editor, 'pointerup', 4, 1);
+    expect(editor.getRoom().walls).toHaveLength(1);
+    expect(editor.getRoom().walls[0]).toMatchObject({ start: { xMeters: 0, yMeters: 0 }, end: { xMeters: 4, yMeters: 0 } });
+    mouse(editor, 'pointerdown', 4, 3);
+    mouse(editor, 'pointerup', 4, 3);
+    expect(editor.getRoom().walls).toHaveLength(2);
+    expect(editor.getRoom().walls[1].end).toEqual({ xMeters: 4, yMeters: 3 });
+    editor.undo();
+    expect(editor.getRoom().walls).toHaveLength(1);
+  });
+
+  it('previews a disconnected wall using the same constraints as the saved wall', () => {
+    const room = createRoom();
+    room.walls = [{ id: 'existing', start: { xMeters: 1, yMeters: 4 }, end: { xMeters: 1, yMeters: 1 }, thicknessMeters: 0.15 }];
+    const editor = new FloorPlanEditor({ room, layer: 'builder', units: 'metric', onChange: () => {}, onSelection: () => {} });
+    editor.setTool('wall');
+    mouse(editor, 'pointerdown', 2, 2);
+    mouse(editor, 'pointermove', 4, 2);
+    expect(editor.element.querySelector('.editor-drawing-preview')?.textContent).toBe('~ 2.00 m');
+    mouse(editor, 'pointerup', 4, 2);
+    expect(editor.getRoom().walls[1].end).toEqual({ xMeters: 4, yMeters: 2 });
+  });
+
+  it('does not draw walls with secondary mouse buttons or cancelled drags', () => {
+    const editor = new FloorPlanEditor({ room: createRoom(), layer: 'builder', units: 'metric', onChange: () => {}, onSelection: () => {} });
+    editor.setTool('wall');
+    mouse(editor, 'pointerdown', 0, 0, 2);
+    mouse(editor, 'pointerup', 4, 0, 2);
+    expect(editor.getRoom().walls).toHaveLength(0);
+    mouse(editor, 'pointerdown', 0, 0);
+    mouse(editor, 'pointercancel', 4, 0);
+    expect(editor.getRoom().walls).toHaveLength(0);
+  });
+
   it('applies object clearances and hides the measured pair of guides', () => {
     const room = createRoom();
     room.points = [[0, 0], [4, 0], [4, 4], [0, 4]].map(([xMeters, yMeters]) => ({ xMeters, yMeters }));
