@@ -81,6 +81,55 @@ describe('custom Bosch profiles', () => {
 });
 
 describe('measurement capture', () => {
+  it('applies a confirmed BLE reading to the chosen photo dimension and persists it', () => {
+    localStorage.clear();
+    const repository = new LocalStorageProjectRepository(localStorage);
+    const project = createProject('Measured photo');
+    const room = project.buildings[0].floors[0].rooms[0];
+    const photo = {
+      id: 'photo', title: 'Wall', notes: '', dataUrl: 'data:image/jpeg;base64,AAAA', mimeType: 'image/jpeg' as const,
+      width: 1200, height: 800, sizeBytes: 4, capturedAt: '2026-01-01T00:00:00.000Z',
+      annotations: [{ id: 'shape', type: 'rectangle' as const, x: 0.1, y: 0.2, endX: 0.8, endY: 0.7, color: '#e85d3f' }],
+    };
+    room.photos.push(photo);
+    repository.save(project);
+    const root = document.createElement('div');
+    document.body.append(root);
+    const app = new SiteMeasureApp(root) as unknown as {
+      showPhotoDialog(projectArg: typeof project, roomArg: typeof room, photoArg: typeof photo): void;
+      receiveBluetoothMeasurement(reading: ParsedMeasurement): void;
+      bluetoothCapture: MeasurementCapture;
+    };
+    const dialog = root.querySelector<HTMLDialogElement>('dialog')!;
+    dialog.showModal = () => dialog.setAttribute('open', '');
+    dialog.close = () => dialog.removeAttribute('open');
+    app.showPhotoDialog(project, room, photo);
+    const dimension = dialog.querySelector<HTMLSelectElement>('[aria-label="Annotation dimension"]')!;
+    dimension.value = 'heightMeters';
+    dimension.dispatchEvent(new Event('change'));
+    app.receiveBluetoothMeasurement({ valueMeters: 2.45, capturedAt: '2026-01-01T00:00:00.000Z', deviceName: 'Meter A' });
+    expect(app.bluetoothCapture.list()).toHaveLength(1);
+    expect(photo.annotations[0]).not.toHaveProperty('heightMeters');
+    [...dialog.querySelectorAll('button')].find((item) => item.textContent === 'Apply')!.click();
+    expect(photo.annotations[0]).toHaveProperty('heightMeters', 2.45);
+    expect(photo.annotations[0]).not.toHaveProperty('widthMeters');
+    expect(app.bluetoothCapture.list()).toHaveLength(0);
+    expect(dialog.querySelector('.photo-annotations')?.textContent).toContain('2.45 m');
+    dimension.value = 'widthMeters';
+    dimension.dispatchEvent(new Event('change'));
+    app.receiveBluetoothMeasurement({ valueMeters: 0, capturedAt: '2026-01-01T00:00:00.000Z', deviceName: 'Meter A' });
+    [...dialog.querySelectorAll('button')].find((item) => item.textContent === 'Apply')!.click();
+    expect(photo.annotations[0]).not.toHaveProperty('widthMeters');
+    expect(app.bluetoothCapture.list()).toHaveLength(1);
+    app.receiveBluetoothMeasurement({ valueMeters: 1.2, capturedAt: '2026-01-01T00:00:00.000Z', deviceName: 'Meter A' });
+    [...dialog.querySelectorAll('button')].find((item) => item.textContent === 'Apply')!.click();
+    [...dialog.querySelectorAll('button')].find((item) => item.textContent === 'Save')!.click();
+    const savedRoom = repository.get(project.id)?.buildings[0].floors[0].rooms[0];
+    expect(savedRoom?.photos[0].annotations[0]).toMatchObject({ heightMeters: 2.45, widthMeters: 1.2 });
+    expect(savedRoom?.measurements).toHaveLength(0);
+    root.remove();
+  });
+
   it('applies manual and laser clearance measurements without resizing the object', () => {
     const repository = new LocalStorageProjectRepository(localStorage);
     const project = createProject('Clearance measurement');

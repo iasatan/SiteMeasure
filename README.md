@@ -42,6 +42,8 @@ In the 3D room view, use the View selector to switch between the orbiting 3D vie
 
 In the plan editor, select a wall in the Editor view control to edit its elevation. Technicians can place an existing object on that wall, draw an object directly, drag it, or resize it using its handle. The inspector also accepts exact distance-along-wall and height-above-floor values. Wall attachments are saved with the project and appear at their mounted height in 3D.
 
+In Photos, draw or select an arrow, rectangle, or circle and choose its length, width, or height. Connect the laser measure and apply a pending reading, or enter a value manually, then save the photo. The measurement is displayed on the annotation; it does not change the outline or infer a scale from the photograph.
+
 ## Current scope
 
 Phases 1 through 4 include:

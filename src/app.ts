@@ -46,6 +46,7 @@ export class SiteMeasureApp {
   private explorerLog: string[] = [];
   private measurementPanelContext: { project: Project; room: Room; wall?: Project['buildings'][number]['floors'][number]['rooms'][number]['walls'][number]; clearanceSide?: ClearanceSide } | null = null;
   private clearanceMeasurement: { objectId: string; side: ClearanceSide; content: HTMLElement } | null = null;
+  private photoMeasurement: { content: HTMLElement; refresh: () => void } | null = null;
   private readonly objectsPage = new ObjectsPage(new ObjectLibrary(localStorage), {
     layer: () => this.layer === 'technician' ? 'technician' : 'designer',
     projects: () => this.repository.list().map((summary) => ({ id: summary.id, name: summary.name })),
@@ -668,11 +669,11 @@ export class SiteMeasureApp {
     this.openDialog(dialog);
   }
 
-  private bluetoothPanel(project: Project, room: Room, wall?: Project['buildings'][number]['floors'][number]['rooms'][number]['walls'][number], clearanceSide?: ClearanceSide): HTMLElement {
+  private bluetoothPanel(project: Project, room: Room, wall?: Project['buildings'][number]['floors'][number]['rooms'][number]['walls'][number], clearanceSide?: ClearanceSide, photoTarget?: { label: string; apply: (captureId: string) => void }): HTMLElement {
     const panel = element('section', 'bluetooth-panel');
     panel.dataset.bluetoothPanel = 'true';
     panel.append(element('h3', '', 'Laser measure'));
-    const target = clearanceSide ? `${clearanceSide} clearance` : (wall ? 'Selected wall' : 'Active room');
+    const target = photoTarget ? photoTarget.label : clearanceSide ? `${clearanceSide} clearance` : (wall ? 'Selected wall' : 'Active room');
     panel.append(element('p', 'bluetooth-target', `Target: ${room.name} · ${target}`));
     const stateRow = element('div', 'bluetooth-status');
     stateRow.append(element('span', 'bluetooth-state', this.bluetoothStateLabel()), element('span', 'bluetooth-device', this.bluetoothAdapter?.deviceName || this.bluetoothProvider.label));
@@ -696,8 +697,10 @@ export class SiteMeasureApp {
       }));
     }
     panel.append(connectionActions);
-    panel.append(button('Configure device', 'button quiet stretch', () => this.showBluetoothSettingsDialog()));
-    panel.append(button('Explore device (all services & events)', 'button quiet stretch', () => this.setView('ble')));
+    if (!photoTarget) {
+      panel.append(button('Configure device', 'button quiet stretch', () => this.showBluetoothSettingsDialog()));
+      panel.append(button('Explore device (all services & events)', 'button quiet stretch', () => this.setView('ble')));
+    }
 
     const captures = this.bluetoothCapture.list();
     if (captures.length) {
@@ -710,7 +713,8 @@ export class SiteMeasureApp {
         readout.append(element('time', '', formatTime(capture.capturedAt)));
         const actions = element('div', 'capture-row-actions');
         actions.append(button('Apply', 'button primary compact', () => {
-          if (clearanceSide) this.applyClearanceCapture(capture.id);
+          if (photoTarget) photoTarget.apply(capture.id);
+          else if (clearanceSide) this.applyClearanceCapture(capture.id);
           else this.applyBluetoothCapture(project, room, wall, capture.id);
         }));
         actions.append(button('Retry', 'button quiet compact', () => {
@@ -753,6 +757,11 @@ export class SiteMeasureApp {
 
   private receiveBluetoothMeasurement(reading: ParsedMeasurement): void {
     const capture = this.bluetoothCapture.receive(reading);
+    if (this.dialog().open && this.photoMeasurement?.content.isConnected) {
+      this.showToast('Measurement received');
+      this.refreshBluetoothSurfaces();
+      return;
+    }
     if (this.dialog().open && this.clearanceMeasurement?.content.isConnected) {
       this.applyClearanceCapture(capture.id);
       return;
@@ -946,6 +955,10 @@ export class SiteMeasureApp {
   }
 
   private refreshBluetoothSurfaces(): void {
+    if (this.dialog().open && this.photoMeasurement?.content.isConnected) {
+      this.photoMeasurement.refresh();
+      return;
+    }
     const panel = this.dialog().open ? this.dialog().querySelector<HTMLElement>('[data-bluetooth-panel]') : null;
     if (this.measurementPanelContext && panel) {
       const { project, room, wall, clearanceSide } = this.measurementPanelContext;
@@ -1465,15 +1478,89 @@ export class SiteMeasureApp {
     image.draggable = false;
     stage.append(image);
     let tool: PhotoAnnotation['type'] = 'arrow';
+    let selectedId = photo.annotations.slice().reverse().find((annotation) => annotation.type !== 'text')?.id ?? '';
     const updateAnnotations = () => {
-      const rendered = renderPhotoAnnotations(image, photo.annotations);
+      const rendered = renderPhotoAnnotations(image, photo.annotations, project.preferredUnits, selectedId);
       const current = stage.querySelector('svg');
       if (current) current.replaceWith(rendered);
       else stage.append(rendered);
     };
-    image.addEventListener('load', () => {
-      stage.append(renderPhotoAnnotations(image, photo.annotations));
-    });
+    image.addEventListener('load', updateAnnotations);
+    const annotationSelect = document.createElement('select');
+    annotationSelect.setAttribute('aria-label', 'Photo annotation');
+    const dimensionSelect = document.createElement('select');
+    dimensionSelect.setAttribute('aria-label', 'Annotation dimension');
+    const dimensionInput = document.createElement('input');
+    dimensionInput.type = 'text';
+    dimensionInput.inputMode = 'decimal';
+    dimensionInput.setAttribute('aria-label', `Dimension in ${project.preferredUnits === 'imperial' ? 'feet' : 'meters'}`);
+    const dimensionStatus = element('p', 'bluetooth-detail');
+    const measurementSection = element('section', 'photo-measurement');
+    const selectedAnnotation = () => photo.annotations.find((annotation) => annotation.id === selectedId && annotation.type !== 'text');
+    const dimensionKey = () => dimensionSelect.value as 'lengthMeters' | 'widthMeters' | 'heightMeters';
+    const refreshDimension = () => {
+      const annotation = selectedAnnotation();
+      const previousDimension = dimensionSelect.value;
+      dimensionSelect.replaceChildren();
+      const dimensions = annotation?.type === 'arrow' ? [['lengthMeters', 'Length']] : annotation ? [['widthMeters', 'Width'], ['heightMeters', 'Height']] : [];
+      for (const [value, label] of dimensions) {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = label;
+        dimensionSelect.append(option);
+      }
+      if (dimensions.some(([value]) => value === previousDimension)) dimensionSelect.value = previousDimension;
+      const value = annotation?.[dimensionKey()];
+      const factor = project.preferredUnits === 'imperial' ? 3.280839895 : 1;
+      dimensionInput.value = value === undefined ? '' : (value * factor).toFixed(3);
+      dimensionInput.disabled = !annotation;
+      dimensionSelect.disabled = !annotation;
+      dimensionStatus.textContent = '';
+    };
+    const refreshSelection = () => {
+      annotationSelect.replaceChildren();
+      for (const [index, annotation] of photo.annotations.entries()) {
+        if (annotation.type === 'text') continue;
+        const option = document.createElement('option');
+        option.value = annotation.id;
+        option.textContent = `${annotation.type[0].toUpperCase()}${annotation.type.slice(1)} ${index + 1}`;
+        annotationSelect.append(option);
+      }
+      if (!photo.annotations.some((annotation) => annotation.id === selectedId && annotation.type !== 'text')) selectedId = annotationSelect.options[0]?.value ?? '';
+      annotationSelect.value = selectedId;
+      annotationSelect.disabled = !selectedId;
+      refreshDimension();
+    };
+    const setDimension = (meters: number): boolean => {
+      const annotation = selectedAnnotation();
+      if (!annotation || !Number.isFinite(meters) || meters < 0.001 || meters > 100000) {
+        dimensionStatus.textContent = annotation ? 'Enter a dimension between 0.001 and 100000 meters.' : 'Select an arrow, rectangle, or circle first.';
+        return false;
+      }
+      annotation[dimensionKey()] = meters;
+      updateAnnotations();
+      refreshDimension();
+      return true;
+    };
+    const refreshPhotoBluetooth = () => {
+      const panel = measurementSection.querySelector<HTMLElement>('[data-bluetooth-panel]');
+      const annotation = selectedAnnotation();
+      const target = annotation ? `${annotation.type} ${dimensionSelect.selectedOptions[0]?.textContent?.toLowerCase()}` : 'Select an annotation';
+      const next = this.bluetoothPanel(project, room, undefined, undefined, {
+        label: target,
+        apply: (captureId) => {
+          const capture = this.bluetoothCapture.list().find((candidate) => candidate.id === captureId);
+          if (!capture || !setDimension(capture.valueMeters)) return;
+          this.bluetoothCapture.discard(captureId);
+          this.showToast('Dimension applied. Save the photo to keep it.');
+          refreshPhotoBluetooth();
+        },
+      });
+      if (panel) panel.replaceWith(next);
+      else measurementSection.append(next);
+    };
+    annotationSelect.addEventListener('change', () => { selectedId = annotationSelect.value; updateAnnotations(); refreshDimension(); refreshPhotoBluetooth(); });
+    dimensionSelect.addEventListener('change', () => { refreshDimension(); refreshPhotoBluetooth(); });
     let start: { x: number; y: number } | null = null;
     stage.addEventListener('pointerdown', (event) => {
       start = normalizedPoint(image, event.clientX, event.clientY);
@@ -1486,10 +1573,14 @@ export class SiteMeasureApp {
         const text = textInput.value.trim();
         if (text) photo.annotations.push({ id: createId(), type: 'text', x: end.x, y: end.y, text, color: '#e85d3f' });
       } else {
-        photo.annotations.push({ id: createId(), type: tool, x: start.x, y: start.y, endX: end.x, endY: end.y, color: '#e85d3f' });
+        const annotation: PhotoAnnotation = { id: createId(), type: tool, x: start.x, y: start.y, endX: end.x, endY: end.y, color: '#e85d3f' };
+        photo.annotations.push(annotation);
+        selectedId = annotation.id;
       }
       start = null;
       updateAnnotations();
+      refreshSelection();
+      refreshPhotoBluetooth();
     });
     const tools = element('div', 'annotation-tools');
     for (const annotationTool of ['arrow', 'rectangle', 'circle', 'text'] as const) {
@@ -1498,7 +1589,21 @@ export class SiteMeasureApp {
         tools.querySelectorAll('button').forEach((item) => item.classList.toggle('is-active', item.textContent?.toLowerCase() === tool));
       }));
     }
-    tools.append(button('Undo annotation', 'button quiet compact', () => { photo.annotations.pop(); updateAnnotations(); }));
+    tools.append(button('Undo annotation', 'button quiet compact', () => { photo.annotations.pop(); refreshSelection(); updateAnnotations(); refreshPhotoBluetooth(); }));
+    const annotationField = element('label', 'field');
+    annotationField.append(element('span', 'field-label', 'Annotation'), annotationSelect);
+    const dimensionField = element('label', 'field');
+    dimensionField.append(element('span', 'field-label', 'Dimension'), dimensionSelect);
+    const valueField = element('label', 'field');
+    valueField.append(element('span', 'field-label', `Value (${project.preferredUnits === 'imperial' ? 'ft' : 'm'})`), dimensionInput);
+    const manualAction = button('Set dimension', 'button quiet compact', () => {
+      const factor = project.preferredUnits === 'imperial' ? 3.280839895 : 1;
+      setDimension(parseDecimalInput(dimensionInput.value) / factor);
+    });
+    measurementSection.append(element('h3', '', 'Annotation dimensions'), annotationField, dimensionField, valueField, manualAction, dimensionStatus);
+    refreshSelection();
+    refreshPhotoBluetooth();
+    this.photoMeasurement = { content, refresh: refreshPhotoBluetooth };
     const actions = element('div', 'dialog-actions');
     actions.append(button('Delete photo', 'button danger', () => {
       room.photos = room.photos.filter((candidate) => candidate.id !== photo.id);
@@ -1511,7 +1616,7 @@ export class SiteMeasureApp {
       project.modifiedAt = new Date().toISOString();
       if (this.save(project)) { dialog.close(); this.render(); }
     }));
-    content.append(stage, tools, textInput, titleField, notes, actions);
+    content.append(stage, tools, textInput, measurementSection, titleField, notes, actions);
     dialog.replaceChildren(content);
     this.openDialog(dialog);
   }

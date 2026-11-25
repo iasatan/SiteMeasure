@@ -128,6 +128,9 @@ function validateRoom(value: unknown, path: string): void {
       for (const dimension of ['width', 'height'] as const) {
         if (annotation[dimension] !== undefined) expectFinite(annotation[dimension], `${annotationPath}.${dimension}`, 0, 1);
       }
+      for (const dimension of ['lengthMeters', 'widthMeters', 'heightMeters'] as const) {
+        if (annotation[dimension] !== undefined) expectFinite(annotation[dimension], `${annotationPath}.${dimension}`, 0.001, 100000);
+      }
       if (annotation.text !== undefined) expectString(annotation.text, `${annotationPath}.text`);
       if (typeof annotation.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(annotation.color)) throw new ProjectValidationError(`${annotationPath}.color is invalid.`);
     });

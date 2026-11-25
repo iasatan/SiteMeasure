@@ -332,14 +332,17 @@
   .photo-confirmation > input { width: 100%; min-height: 46px; border: 1px solid var(--line); border-radius: 3px; padding: 10px 12px; background: var(--surface-raised); color: var(--ink); }
   .photo-result-size { color: var(--muted); font-size: 0.78rem; }
   .photo-editor { display: grid; gap: 10px; }
-  .photo-stage { position: relative; overflow: hidden; border: 1px solid var(--line); background: #111; touch-action: none; }
-  .photo-stage img { width: 100%; height: auto; max-height: 55dvh; object-fit: contain; }
+  .photo-stage { position: relative; display: flex; justify-content: center; overflow: hidden; border: 1px solid var(--line); background: #111; touch-action: none; }
+  .photo-stage img { width: auto; max-width: 100%; height: auto; max-height: 55dvh; }
   .photo-annotations { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
   .photo-annotation-shape, .photo-annotation-line { fill: none; vector-effect: non-scaling-stroke; stroke-width: 3px; }
+  .photo-annotation-shape.annotation-selected, .annotation-selected .photo-annotation-line { stroke-width: 5px; filter: drop-shadow(0 0 2px #fff); }
   .photo-annotation-text { font: 700 24px sans-serif; paint-order: stroke; stroke: #fff; stroke-width: 3px; }
   .annotation-tools { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
   .annotation-tools .button { min-width: 0; padding-inline: 4px; font-size: 0.72rem; }
   .annotation-tools .button.is-active { background: var(--accent); color: #fff; }
+  .photo-measurement { display: grid; gap: 10px; padding: 14px 0; border-top: 1px solid var(--line); }
+  .photo-measurement select, .photo-measurement input { width: 100%; min-height: 44px; padding: 8px; border: 1px solid var(--line); border-radius: 3px; background: var(--surface-raised); color: var(--ink); }
 
   .project-form { display: grid; gap: 13px; }
   .field { display: grid; gap: 5px; }

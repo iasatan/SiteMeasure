@@ -79,6 +79,9 @@ export interface PhotoAnnotation {
   endY?: number;
   width?: number;
   height?: number;
+  lengthMeters?: number;
+  widthMeters?: number;
+  heightMeters?: number;
   text?: string;
   color: string;
 }

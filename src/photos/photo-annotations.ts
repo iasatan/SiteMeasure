@@ -1,13 +1,29 @@
 import type { PhotoAnnotation } from '../domain/models';
+import { formatLength } from '../geometry';
 
-export function renderPhotoAnnotations(image: HTMLImageElement, annotations: readonly PhotoAnnotation[]): SVGSVGElement {
+export function renderPhotoAnnotations(image: HTMLImageElement, annotations: readonly PhotoAnnotation[], units: 'metric' | 'imperial' = 'metric', selectedId?: string): SVGSVGElement {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.classList.add('photo-annotations');
   svg.setAttribute('viewBox', `0 0 ${image.naturalWidth || 1} ${image.naturalHeight || 1}`);
   svg.setAttribute('aria-hidden', 'true');
   for (const annotation of annotations) {
     const shape = annotationElement(annotation, image.naturalWidth, image.naturalHeight);
+    if (annotation.id === selectedId) shape.classList.add('annotation-selected');
     svg.append(shape);
+    const dimensions = [
+      annotation.lengthMeters === undefined ? '' : `L ${formatLength(annotation.lengthMeters, units)}`,
+      annotation.widthMeters === undefined ? '' : `W ${formatLength(annotation.widthMeters, units)}`,
+      annotation.heightMeters === undefined ? '' : `H ${formatLength(annotation.heightMeters, units)}`,
+    ].filter(Boolean);
+    if (dimensions.length) {
+      const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      label.setAttribute('x', String(Math.min(annotation.x, annotation.endX ?? annotation.x) * image.naturalWidth));
+      label.setAttribute('y', String(Math.max(24, Math.min(annotation.y, annotation.endY ?? annotation.y) * image.naturalHeight - 8)));
+      label.setAttribute('fill', annotation.color);
+      label.classList.add('photo-annotation-text');
+      label.textContent = dimensions.join('  ');
+      svg.append(label);
+    }
   }
   return svg;
 }
