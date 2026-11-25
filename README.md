@@ -28,6 +28,8 @@ Projects are stored only in browser `localStorage`. SiteMeasure does not transmi
 
 Current export format: `*.sitemeasure.json`.
 
+In Bluefy, project export uses the iOS share sheet when file sharing is supported; choose a destination such as Save to Files. If file sharing is unsupported or fails, a browser download is available instead. A completed share does not confirm that a file was saved.
+
 ## Debug recording
 
 Enable debug recording under More, reproduce the issue, then turn it off to view or export the JSON log. Recording continues across reloads. Starting another recording replaces the previous one; the latest 1,000 entries are retained, and older entries are discarded. The log captures common browser and interaction events, console messages, unhandled errors and rejections, handled app errors, and Bluetooth diagnostics. It cannot capture events or errors outside the instrumented page or errors caught internally by browser libraries. Form values and typed characters are not recorded by event capture, but button labels, error messages, console output, and Bluetooth diagnostics may contain sensitive information. Review logs before sharing them. Logs stay on the device until exported or browser data is cleared. If storage is full, export the in-memory log before closing the page.

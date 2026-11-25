@@ -5,7 +5,7 @@ import { ProjectValidationError } from '../src/data/schema';
 import { SiteMeasureApp } from '../src/app';
 import type { DebugLog } from '../src/debug-log';
 
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('project files', () => {
   it('round-trips a validated project', () => {
@@ -59,6 +59,7 @@ describe('project files', () => {
   });
 
   it('records each project download step without logging project contents', () => {
+    vi.useFakeTimers();
     const log = vi.fn();
     const root = document.createElement('div');
     document.body.append(root);
@@ -71,11 +72,77 @@ describe('project files', () => {
     project.description = 'Private project contents';
     app.exportProject(project);
     const steps = log.mock.calls.filter(([type]) => type === 'project-export').map(([, detail]) => detail.step);
-    expect(steps).toEqual(['starting', 'serializing', 'serialized', 'blob-created', 'creating-object-url', 'object-url-created', 'link-created', 'clicking-link', 'link-click-returned', 'revoking-object-url', 'object-url-revoked', 'download-requested']);
+    expect(steps).toEqual(['starting', 'serializing', 'serialized', 'blob-created', 'creating-object-url', 'object-url-created', 'link-created', 'clicking-link', 'link-click-returned', 'object-url-revocation-scheduled', 'download-requested']);
+    expect(log).toHaveBeenCalledWith('project-export', expect.objectContaining({ step: 'clicking-link', attachedToDocument: true }));
     expect(JSON.stringify(log.mock.calls)).not.toContain('Private project contents');
     expect(objectUrl).toHaveBeenCalledOnce();
+    expect(revoke).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(60000);
     expect(revoke).toHaveBeenCalledWith('blob:test');
     expect(root.querySelector('.toast')?.textContent).toContain('download requested');
+    root.remove();
+  });
+
+  it('shares a project file on Bluefy when file sharing is supported', async () => {
+    const log = vi.fn();
+    const canShare = vi.fn(() => true);
+    const share = vi.fn<(data: ShareData) => Promise<void>>(() => Promise.resolve());
+    vi.stubGlobal('navigator', { userAgent: 'iPhone Bluefy/3.9.3', platform: 'iPhone', canShare, share });
+    const root = document.createElement('div');
+    document.body.append(root);
+    const app = new SiteMeasureApp(root, undefined, { log } as unknown as DebugLog) as unknown as { exportProject(project: ReturnType<typeof createProject>): void };
+    app.exportProject(createProject('Example'));
+    expect(canShare).toHaveBeenCalledOnce();
+    expect(share).toHaveBeenCalledOnce();
+    const file = share.mock.calls[0][0].files![0];
+    expect(file.name).toBe('example.sitemeasure.json');
+    expect(file.type).toBe('application/json');
+    expect(file.size).toBeGreaterThan(0);
+    await Promise.resolve();
+    expect(log).toHaveBeenCalledWith('project-export', expect.objectContaining({ step: 'share-completed' }));
+    root.remove();
+  });
+
+  it('uses the download fallback when Bluefy cannot share files', () => {
+    vi.useFakeTimers();
+    const log = vi.fn();
+    const share = vi.fn();
+    vi.stubGlobal('navigator', { userAgent: 'iPhone Bluefy/3.9.3', platform: 'iPhone', canShare: () => false, share });
+    vi.stubGlobal('URL', Object.assign(class extends URL {}, { createObjectURL: () => 'blob:test', revokeObjectURL: vi.fn() }));
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    const root = document.createElement('div');
+    document.body.append(root);
+    const app = new SiteMeasureApp(root, undefined, { log } as unknown as DebugLog) as unknown as { exportProject(project: ReturnType<typeof createProject>): void };
+    app.exportProject(createProject('Example'));
+    expect(share).not.toHaveBeenCalled();
+    expect(click).toHaveBeenCalledOnce();
+    expect(log).toHaveBeenCalledWith('project-export', { step: 'file-share-capability', canShare: false });
+    vi.advanceTimersByTime(60000);
+    root.remove();
+  });
+
+  it('offers a download after share failure but not when the share is cancelled', async () => {
+    vi.useFakeTimers();
+    const log = vi.fn();
+    const share = vi.fn<(data: ShareData) => Promise<void>>(() => Promise.reject(new Error('Share unavailable')));
+    vi.stubGlobal('navigator', { userAgent: 'iPhone Bluefy/3.9.3', platform: 'iPhone', canShare: () => true, share });
+    vi.stubGlobal('URL', Object.assign(class extends URL {}, { createObjectURL: () => 'blob:test', revokeObjectURL: vi.fn() }));
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    const root = document.createElement('div');
+    document.body.append(root);
+    const app = new SiteMeasureApp(root, undefined, { log } as unknown as DebugLog) as unknown as { exportProject(project: ReturnType<typeof createProject>): void };
+    app.exportProject(createProject('Example'));
+    await Promise.resolve();
+    expect(log).toHaveBeenCalledWith('project-export.failed', { stage: 'sharing-file', error: 'Error: Share unavailable' });
+    root.querySelector<HTMLButtonElement>('.toast-action')!.click();
+    expect(click).toHaveBeenCalledOnce();
+    vi.advanceTimersByTime(60000);
+    share.mockImplementation(() => Promise.reject(new DOMException('Cancelled', 'AbortError')));
+    app.exportProject(createProject('Example'));
+    await Promise.resolve();
+    expect(log).toHaveBeenCalledWith('project-export', { step: 'share-cancelled' });
+    expect(root.querySelector('.toast-action')).toBeNull();
+    expect(click).toHaveBeenCalledOnce();
     root.remove();
   });
 

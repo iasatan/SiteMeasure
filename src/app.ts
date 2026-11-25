@@ -1864,6 +1864,49 @@ export class SiteMeasureApp {
       const blob = new Blob([serialized], { type: 'application/json' });
       const filename = projectFilename(exported);
       report('blob-created', { bytes: blob.size, mimeType: blob.type, filename });
+      if (/\bBluefy\//i.test(navigator.userAgent) && typeof navigator.share === 'function' && typeof navigator.canShare === 'function' && typeof File === 'function') {
+        const file = new File([blob], filename, { type: blob.type });
+        const shareData: ShareData = { files: [file] };
+        let canShare = false;
+        try {
+          canShare = navigator.canShare(shareData);
+          report('file-share-capability', { canShare });
+        } catch (error) {
+          report('file-share-capability-failed', { error: error instanceof Error ? `${error.name}: ${error.message}` : String(error) });
+        }
+        if (canShare) {
+          const shareFailed = (error: unknown) => {
+            if (error && typeof error === 'object' && 'name' in error && error.name === 'AbortError') {
+              report('share-cancelled');
+              this.showToast('Project sharing cancelled.');
+              return;
+            }
+            this.debugLog?.log('project-export.failed', { stage: 'sharing-file', error: error instanceof Error ? `${error.name}: ${error.message}` : String(error) });
+            this.debugLog?.log('project-export.error', error);
+            this.showToast('Could not share the project.', 'Download instead', () => {
+              try {
+                this.downloadBlob(blob, filename, report);
+                report('download-requested', { browserConfirmationAvailable: false });
+                this.showToast('Project download requested. Check your browser downloads.');
+              } catch (downloadError) {
+                this.debugLog?.log('project-export.failed', { stage: failureStage ?? stage, error: downloadError instanceof Error ? `${downloadError.name}: ${downloadError.message}` : String(downloadError) });
+                this.debugLog?.log('project-export.error', downloadError);
+                this.showToast('Project export failed. Check the debug log for details.');
+              }
+            });
+          };
+          report('sharing-file', { userActivation: navigator.userActivation?.isActive ?? null });
+          try {
+            void navigator.share(shareData).then(() => {
+              report('share-completed', { fileSaveConfirmationAvailable: false });
+              this.showToast('Project share completed.');
+            }, shareFailed);
+          } catch (error) {
+            shareFailed(error);
+          }
+          return;
+        }
+      }
       this.downloadBlob(blob, filename, report);
       report('download-requested', { browserConfirmationAvailable: false });
       this.showToast('Project download requested. Check your browser downloads.');
@@ -1906,22 +1949,42 @@ export class SiteMeasureApp {
   private downloadBlob(blob: Blob, filename: string, report?: (step: string, detail?: Record<string, unknown>) => void): void {
     report?.('creating-object-url');
     const url = URL.createObjectURL(blob);
+    let link: HTMLAnchorElement | undefined;
+    let requested = false;
     try {
       report?.('object-url-created', { scheme: url.split(':', 1)[0] });
-      const link = document.createElement('a');
+      link = document.createElement('a');
       report?.('link-created', { downloadAttributeSupported: 'download' in link });
       link.href = url;
       link.download = filename;
+      if (report) {
+        link.hidden = true;
+        document.body.append(link);
+      }
       report?.('clicking-link', { userActivation: navigator.userActivation?.isActive ?? null, attachedToDocument: link.isConnected });
       link.click();
+      requested = true;
       report?.('link-click-returned');
     } catch (error) {
       report?.('download-step-failed', { error: error instanceof Error ? `${error.name}: ${error.message}` : String(error) });
       throw error;
     } finally {
-      report?.('revoking-object-url');
-      URL.revokeObjectURL(url);
-      report?.('object-url-revoked');
+      link?.remove();
+      if (report && requested) {
+        report('object-url-revocation-scheduled', { delayMs: 60000 });
+        window.setTimeout(() => {
+          try {
+            URL.revokeObjectURL(url);
+            report('object-url-revoked');
+          } catch (error) {
+            this.debugLog?.log('project-export.cleanup-error', error);
+          }
+        }, 60000);
+      } else {
+        report?.('revoking-object-url');
+        URL.revokeObjectURL(url);
+        report?.('object-url-revoked');
+      }
     }
   }
 
