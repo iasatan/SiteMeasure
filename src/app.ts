@@ -15,6 +15,7 @@ import type { BluetoothConnectionState, LaserMeasureAdapter, ParsedMeasurement }
 import { normalizedPoint, renderPhotoAnnotations } from './photos/photo-annotations';
 import { processPhoto } from './photos/photo-processing';
 import { floorPlanSvg, measurementsCsv, printableReport, svgToPng } from './reports/project-exports';
+import type { DebugLog } from './debug-log';
 
 type PrimaryView = 'projects' | 'plan' | 'objects' | 'measure' | 'photos' | 'more' | 'ble';
 
@@ -72,7 +73,7 @@ export class SiteMeasureApp {
   private activeEditor: FloorPlanEditor | null = null;
   private editorSelection: EditorSelection = null;
 
-  constructor(root: HTMLElement, repositoryWarning?: RepositoryWarning) {
+  constructor(root: HTMLElement, repositoryWarning?: RepositoryWarning, private readonly debugLog?: DebugLog) {
     this.root = root;
     this.repository = new LocalStorageProjectRepository(localStorage, (message) => {
       this.notice = message;
@@ -737,12 +738,14 @@ export class SiteMeasureApp {
       await adapter.connect(
         (measurement) => this.receiveBluetoothMeasurement(measurement),
         (state, detail) => {
+          this.debugLog?.log('bluetooth.state', `${state}${detail ? `: ${detail}` : ''}`);
           this.bluetoothState = state;
           this.bluetoothDetail = detail ?? '';
           this.refreshBluetoothSurfaces();
         },
       );
-    } catch {
+    } catch (error) {
+      this.debugLog?.log('handled.error', error);
       this.bluetoothAdapter = adapter;
       this.refreshBluetoothSurfaces();
     }
@@ -819,6 +822,7 @@ export class SiteMeasureApp {
     output.style.cssText = 'max-height:50vh;overflow:auto;white-space:pre-wrap;word-break:break-all;font-size:11px;user-select:text';
     output.textContent = this.explorerLog.join('\n');
     const append = (line: string) => {
+      this.debugLog?.log('bluetooth.explorer', line);
       this.explorerLog.push(`${new Date().toISOString().slice(11, 23)} ${line}`);
       if (!output.isConnected) return;
       output.textContent = this.explorerLog.join('\n');
@@ -917,6 +921,7 @@ export class SiteMeasureApp {
         this.render();
         this.showToast('Bluetooth device profile saved');
       } catch (settingsError) {
+        this.debugLog?.log('handled.error', settingsError);
         error.textContent = settingsError instanceof Error ? settingsError.message : 'The Bluetooth profile is invalid.';
       }
     }));
@@ -1247,6 +1252,31 @@ export class SiteMeasureApp {
     bluetooth.append(element('p', '', configuredProfile ? `${configuredProfile.displayName} is configured for ${this.bluetoothProvider.label}.` : 'No real-device profile is configured. Simulation remains available.'));
     bluetooth.append(button('BLE explorer', 'button quiet stretch', () => this.setView('ble')));
     bluetooth.append(button(configuredProfile ? 'Edit device profile' : 'Configure laser measure', 'button quiet stretch', () => this.showBluetoothSettingsDialog()));
+    const debug = element('section', 'settings-section');
+    debug.append(element('h2', '', 'Debug recording'));
+    if (this.debugLog) {
+      const session = this.debugLog.current;
+      const toggle = document.createElement('label');
+      toggle.className = 'debug-toggle';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = session?.enabled ?? false;
+      checkbox.addEventListener('change', () => {
+        if (checkbox.checked) this.debugLog?.start();
+        else this.debugLog?.stop();
+        this.render();
+      });
+      toggle.append(checkbox, element('span', '', 'Enable debug recording'));
+      debug.append(toggle);
+      debug.append(element('p', '', session?.enabled ? 'Recording is active.' : session ? `Recording stopped. ${session.entries.length} entries saved.` : 'No recording yet.'));
+      debug.append(element('p', '', 'Starting a new recording replaces the previous log. Logs may contain sensitive information; review before sharing.'));
+      if (session?.dropped) debug.append(element('p', 'storage-warning', `${session.dropped} older entries were removed to limit storage use.`));
+      if (this.debugLog.hasStorageError) debug.append(element('p', 'storage-warning', 'The debug log could not be saved to device storage. Export it before closing this page.'));
+      if (session && !session.enabled) {
+        debug.append(button('View debug log', 'button quiet stretch', () => this.showDebugLog()));
+        debug.append(button('Export debug log', 'button quiet stretch', () => this.exportDebugLog()));
+      }
+    }
     const actions = element('section', 'settings-section');
     actions.append(element('h2', '', 'Project files and reports'));
     actions.append(button('Import project', 'button primary stretch', () => this.openImportPicker()));
@@ -1262,8 +1292,29 @@ export class SiteMeasureApp {
       }
       actions.append(button('Print project report', 'button quiet stretch', () => this.printReport(current)));
     }
-    page.append(storage, bluetooth, actions);
+    page.append(storage, bluetooth, debug, actions);
     main.append(page);
+  }
+
+  private showDebugLog(): void {
+    const session = this.debugLog?.current;
+    if (!session) return;
+    const dialog = this.dialog();
+    const content = element('div', 'dialog-content');
+    const title = element('h2', 'dialog-title', 'Debug log');
+    title.id = 'dialog-title';
+    const log = element('pre', 'debug-log');
+    log.textContent = session.entries.map((entry) => `${entry.time} ${entry.type}\n${entry.detail}`).join('\n\n');
+    const actions = element('div', 'dialog-actions');
+    actions.append(button('Export', 'button primary', () => this.exportDebugLog()), button('Close', 'button quiet', () => dialog.close()));
+    content.append(title, element('p', '', `${session.entries.length} entries${session.dropped ? `; ${session.dropped} older entries removed` : ''}`), log, actions);
+    dialog.replaceChildren(content);
+    this.openDialog(dialog);
+  }
+
+  private exportDebugLog(): void {
+    const session = this.debugLog?.current;
+    if (session) this.downloadText(JSON.stringify(session, null, 2), `sitemeasure-debug-${session.startedAt.replace(/[:.]/g, '-')}.json`, 'application/json');
   }
 
   private renderPhotos(main: HTMLElement): void {
@@ -1355,6 +1406,7 @@ export class SiteMeasureApp {
       const photo = await processPhoto(file);
       this.showProcessedPhotoConfirmation(project, room, photo);
     } catch (error) {
+      this.debugLog?.log('handled.error', error);
       const message = error instanceof Error ? error.message : 'The photo could not be processed.';
       processingStatus.textContent = `${message} Choose another photo to try again.`;
       this.showToast(message);
@@ -1561,6 +1613,7 @@ export class SiteMeasureApp {
       const project = await readProjectFile(file);
       this.showImportPreview(project);
     } catch (error) {
+      this.debugLog?.log('handled.error', error);
       this.showToast(error instanceof Error ? error.message : 'The project could not be imported.');
     } finally {
       const input = this.root.querySelector<HTMLInputElement>('[data-import-input]');
@@ -1642,6 +1695,7 @@ export class SiteMeasureApp {
         try {
           preview = createRoomPreview(stage, currentRoom);
         } catch (error) {
+          this.debugLog?.log('handled.error', error);
           stage.append(element('p', 'validation-warning', error instanceof Error ? error.message : 'The 3D room could not be displayed.'));
         }
       };
@@ -1655,6 +1709,7 @@ export class SiteMeasureApp {
       reload();
       dialog.addEventListener('close', () => preview?.dispose(), { once: true });
     } catch (error) {
+      this.debugLog?.log('handled.error', error);
       const content = element('div', 'dialog-content');
       content.append(element('p', 'eyebrow', '3D room'), element('h2', 'dialog-title', 'Could not render room'));
       content.append(element('p', 'validation-warning', error instanceof Error ? error.message : 'The 3D room could not be displayed.'));
@@ -1677,6 +1732,7 @@ export class SiteMeasureApp {
       const blob = await svgToPng(floorPlanSvg(project, room));
       this.downloadBlob(blob, `${safeFilename(room.name)}-plan.png`);
     } catch (error) {
+      this.debugLog?.log('handled.error', error);
       this.showToast(error instanceof Error ? error.message : 'The PNG could not be exported.');
     }
   }
@@ -1740,6 +1796,7 @@ export class SiteMeasureApp {
       this.renderSaveIndicator();
       return true;
     } catch (error) {
+      this.debugLog?.log('handled.error', error);
       this.dirty = true;
       this.saveState = 'error';
       this.notice = error instanceof Error ? error.message : 'The project could not be saved.';
