@@ -264,6 +264,11 @@
   .editor-elevation-object { fill: #e7af73; stroke-width: 0.025; }
   .editor-elevation-object.is-selected { stroke-width: 0.035; }
   .editor-elevation-hit { fill: transparent; pointer-events: all; }
+  .editor-clearance { cursor: pointer; }
+  .editor-clearance-hit { stroke: transparent; stroke-width: 20px; vector-effect: non-scaling-stroke; pointer-events: stroke; }
+  .editor-clearance-line { stroke: #b24928; stroke-width: 2px; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
+  .editor-clearance-label { fill: #873518; font: 700 0.16px "Avenir Next", sans-serif; text-anchor: middle; paint-order: stroke; stroke: #fff; stroke-width: 0.05px; }
+  .editor-clearance-line, .editor-clearance-label { pointer-events: none; }
   .editor-opening { stroke: #dce2da; stroke-width: 0.2; }
   .editor-window { stroke: #2782a5; stroke-width: 0.09; }
   .editor-door { stroke: var(--accent); stroke-width: 0.13; stroke-dasharray: 0.08 0.07; }

@@ -27,6 +27,51 @@ function rectangleEditor(): EditorInternals {
 const loop = (editor: EditorInternals) => editor.room.walls.map((wall) => [wall.start.xMeters, wall.start.yMeters, wall.end.xMeters, wall.end.yMeters].map((value) => Math.round(value * 1000) / 1000));
 
 describe('floor plan editor', () => {
+  it('applies object clearances and hides the measured pair of guides', () => {
+    const room = createRoom();
+    room.points = [[0, 0], [4, 0], [4, 4], [0, 4]].map(([xMeters, yMeters]) => ({ xMeters, yMeters }));
+    room.walls = room.points.map((start, index) => ({ id: `wall${index}`, start, end: room.points[(index + 1) % 4], thicknessMeters: 0.15 }));
+    room.objects = [{ id: 'cabinet', name: 'Cabinet', widthMeters: 1, depthMeters: 0.5, heightMeters: 1, xMeters: 1, yMeters: 0.5, elevationMeters: 0.3 }];
+    const editor = new FloorPlanEditor({ room, layer: 'designer', units: 'metric', onChange: () => {}, onSelection: () => {} });
+    const view = editor.element.querySelector<HTMLSelectElement>('[aria-label="Editor view"]')!;
+    view.value = 'wall0';
+    view.dispatchEvent(new Event('change'));
+    (editor as unknown as EditorInternals).handleSelectionPointer({ xMeters: 1.5, yMeters: -0.5 }, editor.element.querySelector<SVGElement>('.editor-elevation-object')!);
+    expect(editor.getSelectedClearances().map((entry) => entry.side)).toEqual(['left', 'right', 'floor', 'ceiling']);
+    expect(editor.element.querySelectorAll('.editor-clearance')).toHaveLength(4);
+    const measurement = { id: 'm', targetType: 'other' as const, targetId: 'cabinet', valueMeters: 0.4, capturedAt: '2026-01-01T00:00:00Z', source: 'manual' as const };
+    expect(editor.applyObjectClearance('ceiling', { ...measurement, valueMeters: 3 })).toBe(false);
+    expect(editor.element.querySelectorAll('.editor-clearance')).toHaveLength(4);
+    expect(editor.applyObjectClearance('ceiling', measurement)).toBe(true);
+    expect(editor.getRoom().objects[0].elevationMeters).toBeCloseTo(1.3);
+    expect(editor.getSelectedClearances().map((entry) => entry.side)).toEqual(['left', 'right']);
+    expect(editor.element.querySelectorAll('.editor-clearance')).toHaveLength(2);
+    expect(editor.applyObjectClearance('right', { ...measurement, id: 'm2', valueMeters: 0.5 })).toBe(true);
+    expect(editor.getRoom().objects[0].xMeters).toBeCloseTo(2.5);
+    expect(editor.getSelectedClearances()).toEqual([]);
+    expect(editor.getRoom().measurements).toHaveLength(2);
+    expect(editor.getRoom().measurements[0].clearance).toEqual({ side: 'ceiling', wallId: 'wall0' });
+    editor.undo();
+    expect(editor.getRoom().objects[0].xMeters).toBeCloseTo(1);
+  });
+
+  it('positions a wall-mounted object by clearances without detaching it', () => {
+    const room = createRoom();
+    room.points = [[0, 0], [4, 0], [4, 4], [0, 4]].map(([xMeters, yMeters]) => ({ xMeters, yMeters }));
+    room.walls = room.points.map((start, index) => ({ id: `wall${index}`, start, end: room.points[(index + 1) % 4], thicknessMeters: 0.15 }));
+    room.objects = [{ id: 'socket', name: 'Socket', layer: 'technician', widthMeters: 0.2, depthMeters: 0.1, heightMeters: 0.2, wallMount: { wallId: 'wall0', offsetMeters: 1, elevationMeters: 0.3 } }];
+    const editor = new FloorPlanEditor({ room, layer: 'technician', units: 'metric', onChange: () => {}, onSelection: () => {} });
+    const view = editor.element.querySelector<HTMLSelectElement>('[aria-label="Editor view"]')!;
+    view.value = 'wall0';
+    view.dispatchEvent(new Event('change'));
+    (editor as unknown as EditorInternals).handleSelectionPointer({ xMeters: 1.1, yMeters: -0.4 }, editor.element.querySelector<SVGElement>('.editor-elevation-object')!);
+    const measurement = { id: 'm', targetType: 'other' as const, targetId: 'socket', valueMeters: 0.5, capturedAt: '2026-01-01T00:00:00Z', source: 'manual' as const };
+    expect(editor.applyObjectClearance('left', measurement)).toBe(true);
+    expect(editor.applyObjectClearance('floor', { ...measurement, id: 'm2' })).toBe(true);
+    expect(editor.getRoom().objects[0].wallMount).toMatchObject({ wallId: 'wall0', offsetMeters: 0.5, elevationMeters: 0.5 });
+    expect(editor.getRoom().objects[0].xMeters).toBeCloseTo(0.5);
+  });
+
   it('rotates a free-standing object around its center and supports undo and redo', () => {
     const room = createRoom();
     room.objects = [{ id: 'cabinet', name: 'Cabinet', widthMeters: 2, depthMeters: 1, heightMeters: 1, xMeters: 1, yMeters: 2 }];
@@ -448,6 +493,17 @@ describe('floor plan editor', () => {
     expect(editor.room.walls).toHaveLength(4);
     expect(editor.room.doors).toHaveLength(0);
     expect(editor.room.walls[0].end).toEqual({ xMeters: 4, yMeters: 0 });
+  });
+
+  it('uses a 60 cm default for doors added from either wall action or drawing tool', () => {
+    const selectedWallEditor = rectangleEditor();
+    selectedWallEditor.selection = { type: 'wall', id: 'w0' };
+    selectedWallEditor.addDoorToSelectedWall();
+    expect(selectedWallEditor.room.doors[0].widthMeters).toBeCloseTo(0.6);
+
+    const drawingEditor = rectangleEditor() as EditorInternals & { addOpeningAt(type: string, wall: EditorInternals['room']['walls'][number], point: { xMeters: number; yMeters: number }): void };
+    drawingEditor.addOpeningAt('door', drawingEditor.room.walls[0], { xMeters: 2, yMeters: 0 });
+    expect(drawingEditor.room.doors[0].widthMeters).toBeCloseTo(0.6);
   });
 
   it('migrates existing overlay openings into a selectable wall chain', () => {

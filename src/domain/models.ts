@@ -67,6 +67,7 @@ export interface Measurement {
   capturedAt: string;
   source: 'manual' | 'bluetooth';
   deviceName?: string;
+  clearance?: { side: 'left' | 'right' | 'floor' | 'ceiling'; wallId: string };
 }
 
 export interface PhotoAnnotation {

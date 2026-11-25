@@ -220,7 +220,7 @@ export function createRoomPreview(container: HTMLElement, room: Room): { dispose
   };
 }
 
-function createRoomScene(room: Room): THREE.Scene {
+export function createRoomScene(room: Room): THREE.Scene {
   const scene = new THREE.Scene();
   const points = room.points.length >= 3
     ? room.points
@@ -253,10 +253,21 @@ function createRoomScene(room: Room): THREE.Scene {
     addBox(scene, maxX - minX, 0.08, maxZ - minZ, 0, 0, 0, floorMaterial);
   }
 
+  const openings = [
+    ...room.doors.map((door) => ({ ...door, kind: 'door' as const })),
+    ...room.windows.map((window) => ({ ...window, kind: 'window' as const })),
+  ];
   for (const wall of room.walls) {
     const group = new THREE.Group();
     group.userData.wallId = wall.id;
-    addWall(group, room, wall.id, wall.start, wall.end, wall.thicknessMeters, height, offsetX, offsetZ, wallMaterial, trimMaterial);
+    const wallOpenings = openings.filter((opening) => opening.wallId === wall.id);
+    addWall(group, wallOpenings.filter((opening) => !opening.rightWallId), wall.start, wall.end, wall.thicknessMeters, height, offsetX, offsetZ, wallMaterial, trimMaterial);
+    for (const opening of wallOpenings) {
+      const rightWall = opening.rightWallId ? room.walls.find((candidate) => candidate.id === opening.rightWallId) : undefined;
+      if (!rightWall) continue;
+      const gapLength = Math.hypot(rightWall.start.xMeters - wall.end.xMeters, rightWall.start.yMeters - wall.end.yMeters);
+      addWall(group, [{ ...opening, offsetMeters: 0, widthMeters: gapLength }], wall.end, rightWall.start, wall.thicknessMeters, height, offsetX, offsetZ, wallMaterial, trimMaterial);
+    }
     scene.add(group);
   }
   for (const object of room.objects) {
@@ -297,15 +308,12 @@ function createRoomScene(room: Room): THREE.Scene {
   return scene;
 }
 
-function addWall(scene: THREE.Object3D, room: Room, wallId: string, start: { xMeters: number; yMeters: number }, end: { xMeters: number; yMeters: number }, thickness: number, roomHeightValue: number, offsetX: number, offsetZ: number, wallMaterial: THREE.Material, trimMaterial: THREE.Material): void {
+function addWall(scene: THREE.Object3D, openings: Array<{ offsetMeters: number; widthMeters: number; heightMeters?: number; kind: 'door' | 'window' }>, start: { xMeters: number; yMeters: number }, end: { xMeters: number; yMeters: number }, thickness: number, roomHeightValue: number, offsetX: number, offsetZ: number, wallMaterial: THREE.Material, trimMaterial: THREE.Material): void {
   const dx = end.xMeters - start.xMeters;
   const dz = end.yMeters - start.yMeters;
   const length = Math.hypot(dx, dz);
   if (!length) return;
-  const openings = [...room.doors, ...room.windows]
-    .filter((opening) => opening.wallId === wallId)
-    .map((opening) => ({ ...opening, kind: 'heightMeters' in opening && room.doors.some((door) => door.id === opening.id) ? 'door' : 'window' }))
-    .sort((left, right) => left.offsetMeters - right.offsetMeters);
+  openings.sort((left, right) => left.offsetMeters - right.offsetMeters);
   const angle = Math.atan2(dz, dx);
   const addSegment = (from: number, to: number, bottom: number, top: number, material: THREE.Material) => {
     if (to <= from || top <= bottom) return;
@@ -330,8 +338,8 @@ function addWall(scene: THREE.Object3D, room: Room, wallId: string, start: { xMe
     addSegment(cursor, from, 0, roomHeightValue, wallMaterial);
     const openingHeight = Math.min(opening.heightMeters ?? (opening.kind === 'door' ? 2.1 : 1.2), roomHeightValue);
     if (opening.kind === 'window') {
-      const sill = Math.max(0, 0.9);
-      addSegment(from, to, 0, Math.min(sill, openingHeight), wallMaterial);
+      const sill = Math.min(0.9, Math.max(0, roomHeightValue - openingHeight));
+      addSegment(from, to, 0, sill, wallMaterial);
       addSegment(from, to, Math.min(sill + openingHeight, roomHeightValue), roomHeightValue, wallMaterial);
     } else {
       addSegment(from, to, openingHeight, roomHeightValue, trimMaterial);

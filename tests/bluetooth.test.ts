@@ -81,6 +81,55 @@ describe('custom Bosch profiles', () => {
 });
 
 describe('measurement capture', () => {
+  it('applies manual and laser clearance measurements without resizing the object', () => {
+    const repository = new LocalStorageProjectRepository(localStorage);
+    const project = createProject('Clearance measurement');
+    const room = project.buildings[0].floors[0].rooms[0];
+    room.points = [[0, 0], [4, 0], [4, 4], [0, 4]].map(([xMeters, yMeters]) => ({ xMeters, yMeters }));
+    room.walls = room.points.map((start, index) => ({ id: `wall${index}`, start, end: room.points[(index + 1) % 4], thicknessMeters: 0.15 }));
+    room.objects = [{ id: 'object', name: 'Cabinet', widthMeters: 1, depthMeters: 0.5, heightMeters: 1, xMeters: 1, yMeters: 0.5 }];
+    repository.save(project);
+    const root = document.createElement('div');
+    document.body.append(root);
+    const app = new SiteMeasureApp(root) as unknown as {
+      openProject(id: string): void;
+      receiveBluetoothMeasurement(reading: ParsedMeasurement): void;
+      activeEditor: { handleSelectionPointer(point: { xMeters: number; yMeters: number }, target: SVGElement | null): void };
+      bluetoothCapture: MeasurementCapture;
+    };
+    app.openProject(project.id);
+    const dialog = root.querySelector<HTMLDialogElement>('dialog')!;
+    dialog.showModal = () => dialog.setAttribute('open', '');
+    dialog.close = () => dialog.removeAttribute('open');
+    const layer = root.querySelector<HTMLSelectElement>('[aria-label="Editing layer"]')!;
+    layer.value = 'designer';
+    layer.dispatchEvent(new Event('change'));
+    const view = root.querySelector<HTMLSelectElement>('[aria-label="Editor view"]')!;
+    view.value = 'wall0';
+    view.dispatchEvent(new Event('change'));
+    app.activeEditor.handleSelectionPointer({ xMeters: 1.5, yMeters: -0.5 }, root.querySelector<SVGElement>('.editor-elevation-object'));
+    expect(root.querySelectorAll('.editor-clearance')).toHaveLength(4);
+    root.querySelector<SVGElement>('[data-clearance="ceiling"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    dialog.querySelector('input')!.value = '0.4';
+    [...dialog.querySelectorAll('button')].find((item) => item.textContent === 'Apply')!.click();
+    expect(dialog.open).toBe(false);
+    expect(root.querySelectorAll('.editor-clearance')).toHaveLength(2);
+    [...root.querySelectorAll('button')].find((item) => item.textContent?.startsWith('Left wall:'))!.click();
+    app.receiveBluetoothMeasurement({ valueMeters: 5, capturedAt: '2026-01-01T00:00:00.000Z', deviceName: 'Meter A' });
+    expect(dialog.open).toBe(true);
+    expect(app.bluetoothCapture.list()).toHaveLength(1);
+    app.receiveBluetoothMeasurement({ valueMeters: 0.6, capturedAt: '2026-01-01T00:00:01.000Z', deviceName: 'Meter A' });
+    const saved = repository.get(project.id)!.buildings[0].floors[0].rooms[0];
+    expect(saved.objects[0].widthMeters).toBe(1);
+    expect(saved.objects[0].xMeters).toBeCloseTo(0.6);
+    expect(saved.objects[0].elevationMeters).toBeCloseTo(1.3);
+    expect(saved.measurements.map((entry) => entry.clearance)).toEqual([{ side: 'ceiling', wallId: 'wall0' }, { side: 'left', wallId: 'wall0' }]);
+    expect(saved.measurements[1].source).toBe('bluetooth');
+    expect(root.querySelectorAll('.editor-clearance')).toHaveLength(0);
+    expect(app.bluetoothCapture.list()).toHaveLength(0);
+    root.remove();
+  });
+
   it('applies incoming readings to the selected plan item and persists them', () => {
     const repository = new LocalStorageProjectRepository(localStorage);
     const project = createProject('Device measurement');

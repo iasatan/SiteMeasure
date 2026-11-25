@@ -95,6 +95,11 @@ function validateRoom(value: unknown, path: string): void {
     expectFinite(measurement.valueMeters, `${path}.measurements[${index}].valueMeters`, 0.001, 1_000_000);
     expectIsoDate(measurement.capturedAt, `${path}.measurements[${index}].capturedAt`);
     if (measurement.deviceName !== undefined) expectString(measurement.deviceName, `${path}.measurements[${index}].deviceName`, false);
+    if (measurement.clearance !== undefined) {
+      const clearance = expectRecord(measurement.clearance, `${path}.measurements[${index}].clearance`);
+      if (!['left', 'right', 'floor', 'ceiling'].includes(String(clearance.side))) throw new ProjectValidationError(`${path}.measurements[${index}].clearance.side is invalid.`);
+      expectString(clearance.wallId, `${path}.measurements[${index}].clearance.wallId`, false);
+    }
   });
   expectArray(room.photos, `${path}.photos`).forEach((photoValue, index) => {
     const photoPath = `${path}.photos[${index}]`;

@@ -3,6 +3,9 @@ import { cornerAngleDegrees, distanceBetween, formatLength, nearestPointOnSegmen
 
 export type EditorTool = 'select' | 'wall' | 'room' | 'door' | 'window' | 'object' | 'measure';
 export type EditorSelection = { type: 'wall' | 'room' | 'object' | 'door' | 'window'; id: string } | null;
+export type ClearanceSide = 'left' | 'right' | 'floor' | 'ceiling';
+
+const DEFAULT_DOOR_WIDTH_METERS = 0.6;
 
 export interface FloorPlanEditorOptions {
   room: Room;
@@ -12,6 +15,7 @@ export interface FloorPlanEditorOptions {
   onSelection(selection: EditorSelection): void;
   onMeasure?(wall: Wall): void;
   onMeasureObject?(id: string): void;
+  onMeasureClearance?(id: string, side: ClearanceSide): void;
   onOpening?(kind: OpeningKind, id: string): void;
 }
 
@@ -40,6 +44,7 @@ export class FloorPlanEditor {
   private readonly onSelection: FloorPlanEditorOptions['onSelection'];
   private readonly onMeasure: FloorPlanEditorOptions['onMeasure'];
   private readonly onMeasureObject: FloorPlanEditorOptions['onMeasureObject'];
+  private readonly onMeasureClearance: FloorPlanEditorOptions['onMeasureClearance'];
   private readonly onOpening: FloorPlanEditorOptions['onOpening'];
   private readonly svg: SVGSVGElement;
   private readonly controls: HTMLElement;
@@ -47,6 +52,7 @@ export class FloorPlanEditor {
   private readonly summary: HTMLElement;
   private tool: EditorTool = 'select';
   private selection: EditorSelection = null;
+  private readonly measuredClearanceAxes = new Set<'horizontal' | 'vertical'>();
   private drawingPoints: Point[] = [];
   private wallStart: Point | null = null;
   private objectStart: Point | null = null;
@@ -80,6 +86,7 @@ export class FloorPlanEditor {
     this.onSelection = options.onSelection;
     this.onMeasure = options.onMeasure;
     this.onMeasureObject = options.onMeasureObject;
+    this.onMeasureClearance = options.onMeasureClearance;
     this.onOpening = options.onOpening;
     this.element = document.createElement('div');
     this.element.className = 'floor-editor';
@@ -106,6 +113,7 @@ export class FloorPlanEditor {
   setRoom(room: Room): void {
     this.room = structuredClone(room);
     this.selection = null;
+    this.measuredClearanceAxes.clear();
     this.render();
   }
 
@@ -128,6 +136,7 @@ export class FloorPlanEditor {
     this.redoStack.push(structuredClone(this.room));
     this.room = previous;
     this.selection = null;
+    this.measuredClearanceAxes.clear();
     this.onSelection(null);
     this.onChange(structuredClone(this.room), true);
     this.render();
@@ -295,6 +304,64 @@ export class FloorPlanEditor {
     return this.updateOpening(selection.type, selection.id, distanceBetween(found.wall.start, found.wall.end), found.opening.offsetMeters, value, undefined, measurement);
   }
 
+  getSelectedClearances(): Array<{ side: ClearanceSide; valueMeters: number }> {
+    if (this.view === 'floor' || this.selection?.type !== 'object') return [];
+    const object = this.room.objects.find((candidate) => candidate.id === this.selection?.id);
+    const elevation = wallElevation(this.room, this.view);
+    if (!object || !elevation || !this.canEditSelection(this.selection)) return [];
+    const projection = this.projectObjectOnWall(object, elevation);
+    if (!projection) return [];
+    const bottom = object.wallMount?.elevationMeters ?? object.elevationMeters ?? 0;
+    return [
+      ...(!projection.clipped && !this.measuredClearanceAxes.has('horizontal') ? [{ side: 'left' as const, valueMeters: projection.offset }, { side: 'right' as const, valueMeters: elevation.length - projection.offset - projection.width }] : []),
+      ...(!this.measuredClearanceAxes.has('vertical') ? [{ side: 'floor' as const, valueMeters: bottom }, { side: 'ceiling' as const, valueMeters: roomHeight(this.room) - bottom - object.heightMeters }] : []),
+    ];
+  }
+
+  applyObjectClearance(side: ClearanceSide, measurement: Measurement): boolean {
+    const selection = this.selection;
+    const clearance = this.getSelectedClearances().find((candidate) => candidate.side === side);
+    const elevation = this.view === 'floor' ? null : wallElevation(this.room, this.view);
+    const object = selection?.type === 'object' ? this.room.objects.find((candidate) => candidate.id === selection.id) : undefined;
+    if (!clearance || !elevation || !object || measurement.targetId !== object.id || !Number.isFinite(measurement.valueMeters) || measurement.valueMeters < 0.001) return false;
+    const projection = this.projectObjectOnWall(object, elevation);
+    if (!projection) return false;
+    const vertical = side === 'floor' || side === 'ceiling';
+    const maximum = vertical ? roomHeight(this.room) - object.heightMeters : elevation.length - projection.width;
+    if (measurement.valueMeters > maximum) return false;
+    const delta = (measurement.valueMeters - clearance.valueMeters) * (side === 'right' ? -1 : 1);
+    const mountedElevation = object.wallMount ? wallElevation(this.room, object.wallMount.wallId) : null;
+    if (!vertical && object.wallMount && !mountedElevation) return false;
+    if (!vertical && !object.wallMount && (object.xMeters === undefined || object.yMeters === undefined)) return false;
+    this.beginAction();
+    if (vertical) {
+      const bottom = side === 'floor' ? measurement.valueMeters : maximum - measurement.valueMeters;
+      if (object.wallMount) object.wallMount.elevationMeters = bottom;
+      else object.elevationMeters = bottom;
+    } else this.moveObjectAlongElevation(object, elevation, mountedElevation, delta);
+    this.measuredClearanceAxes.add(vertical ? 'vertical' : 'horizontal');
+    this.commitAction({ ...measurement, clearance: { side, wallId: this.view } });
+    return true;
+  }
+
+  private moveObjectAlongElevation(object: RoomObject, elevation: WallElevation, mountedElevation: WallElevation | null, delta: number): void {
+    if (object.wallMount && mountedElevation && elevation.wallIds.includes(object.wallMount.wallId)) {
+      const direction = mountedElevation.axis.xMeters * elevation.axis.xMeters + mountedElevation.axis.yMeters * elevation.axis.yMeters < 0 ? -1 : 1;
+      object.wallMount.offsetMeters += delta * direction;
+    } else {
+      if (object.wallMount && mountedElevation) {
+        const origin = pointOnWall(mountedElevation, object.wallMount.offsetMeters);
+        object.xMeters = origin.xMeters;
+        object.yMeters = origin.yMeters;
+        object.rotationRadians = Math.atan2(mountedElevation.axis.yMeters, mountedElevation.axis.xMeters);
+        object.elevationMeters = object.wallMount.elevationMeters;
+        delete object.wallMount;
+      }
+      object.xMeters = object.xMeters! + elevation.axis.xMeters * delta;
+      object.yMeters = object.yMeters! + elevation.axis.yMeters * delta;
+    }
+  }
+
   getCornerAngle(): number | null {
     const wall = this.selectedWall();
     return wall ? cornerAngleDegrees(this.room.walls, this.room.walls.indexOf(wall)) : null;
@@ -355,7 +422,7 @@ export class FloorPlanEditor {
     ];
   }
 
-  addDoorToSelectedWall(widthMeters = 0.9): void {
+  addDoorToSelectedWall(widthMeters = DEFAULT_DOOR_WIDTH_METERS): void {
     this.addOpening('door', widthMeters);
   }
 
@@ -624,6 +691,7 @@ export class FloorPlanEditor {
 
   private handleObjectDrag(world: Point): boolean {
     if (!this.dragOrigin || this.selection?.type !== 'object' || !this.originalRoom) return false;
+    if (world.xMeters !== this.dragOrigin.xMeters || world.yMeters !== this.dragOrigin.yMeters) this.measuredClearanceAxes.clear();
     const original = this.originalRoom.objects.find((candidate) => candidate.id === this.selection?.id);
     const object = this.room.objects.find((candidate) => candidate.id === this.selection?.id);
     if (this.view !== 'floor' && original && object && (!original.wallMount || !wallElevation(this.room, this.view)?.wallIds.includes(original.wallMount.wallId))) return this.handleProjectedObjectDrag(world, original, object);
@@ -953,7 +1021,7 @@ export class FloorPlanEditor {
   private addOpeningAt(type: EditorTool, wall: Wall, world: Point): void {
     const point = nearestPointOnSegment(world, wall.start, wall.end);
     const wallLength = distanceBetween(wall.start, wall.end);
-    const width = type === 'door' ? Math.min(0.9, wallLength * 0.7) : Math.min(1.2, wallLength * 0.7);
+    const width = type === 'door' ? Math.min(DEFAULT_DOOR_WIDTH_METERS, wallLength * 0.7) : Math.min(1.2, wallLength * 0.7);
     const fromStart = distanceBetween(wall.start, point);
     const minimumSide = 0.05;
     const offset = Math.max(minimumSide, Math.min(wallLength - width - minimumSide, fromStart - width / 2));
@@ -1058,6 +1126,7 @@ export class FloorPlanEditor {
   }
 
   private select(selection: EditorSelection): void {
+    if (selection?.type !== this.selection?.type || selection?.id !== this.selection?.id) this.measuredClearanceAxes.clear();
     this.selection = selection;
     this.onSelection(selection);
     this.render();
@@ -1192,6 +1261,7 @@ export class FloorPlanEditor {
       this.wallStart = null;
       this.drawingPoints = [];
       this.selection = null;
+      this.measuredClearanceAxes.clear();
       this.onSelection(null);
       this.svg.setAttribute('aria-label', this.view === 'floor' ? `Editable floor plan for ${this.room.name}` : `Editable wall elevation for ${this.room.name}`);
       this.fitDrawing();
@@ -1257,6 +1327,7 @@ export class FloorPlanEditor {
       return projection ? [{ object, ...projection }] : [];
     }).sort((first, second) => first.distance - second.distance);
     let selectedHandle: SVGElement | null = null;
+    let selectedProjection: { offset: number; width: number; top: number; height: number } | null = null;
     for (const { object, offset, width, top } of projectedObjects) {
       const editable = this.canEditSelection({ type: 'object', id: object.id });
       if (editable) {
@@ -1284,22 +1355,69 @@ export class FloorPlanEditor {
       rect.append(title);
       this.svg.append(rect);
       if (editable && this.selection?.type === 'object' && this.selection.id === object.id) {
+        selectedProjection = { offset, width, top, height: object.heightMeters };
         const handle = this.pointMarker({ xMeters: offset + width + 0.1, yMeters: top - 0.1 });
         handle.dataset.objectId = object.id;
         handle.dataset.resizeObject = 'true';
         selectedHandle = handle;
       }
     }
+    if (selectedProjection) this.renderClearanceGuides(selectedProjection, elevation.length, height);
     if (selectedHandle) this.svg.append(selectedHandle);
     if (this.objectStart) this.svg.append(this.pointMarker(this.objectStart));
   }
 
-  private projectObjectOnWall(object: RoomObject, elevation: WallElevation): { offset: number; width: number; top: number; distance: number } | null {
+  private renderClearanceGuides(projection: { offset: number; width: number; top: number; height: number }, wallWidth: number, wallHeight: number): void {
+    const centerX = projection.offset + projection.width / 2;
+    const centerY = projection.top + projection.height / 2;
+    const endpoints: Record<ClearanceSide, [number, number, number, number]> = {
+      left: [0, centerY, projection.offset, centerY],
+      right: [projection.offset + projection.width, centerY, wallWidth, centerY],
+      floor: [centerX, projection.top + projection.height, centerX, 0],
+      ceiling: [centerX, -wallHeight, centerX, projection.top],
+    };
+    for (const clearance of this.getSelectedClearances()) {
+      const [x1, y1, x2, y2] = endpoints[clearance.side];
+      const group = svgElement('g', 'editor-clearance');
+      group.dataset.clearance = clearance.side;
+      group.setAttribute('role', 'button');
+      group.setAttribute('tabindex', '0');
+      group.setAttribute('aria-label', `Measure ${clearance.side} clearance: ${formatLength(Math.max(0, clearance.valueMeters), this.units)}`);
+      const hit = svgElement('line', 'editor-clearance-hit');
+      hit.setAttribute('x1', String(x1));
+      hit.setAttribute('y1', String(y1));
+      hit.setAttribute('x2', String(x2));
+      hit.setAttribute('y2', String(y2));
+      const line = svgElement('line', 'editor-clearance-line');
+      line.setAttribute('x1', String(x1));
+      line.setAttribute('y1', String(y1));
+      line.setAttribute('x2', String(x2));
+      line.setAttribute('y2', String(y2));
+      const label = svgElement('text', 'editor-clearance-label');
+      label.setAttribute('x', String((x1 + x2) / 2));
+      label.setAttribute('y', String((y1 + y2) / 2 - 0.04));
+      label.textContent = formatLength(Math.max(0, clearance.valueMeters), this.units);
+      group.append(hit, line, label);
+      group.addEventListener('pointerdown', (event) => event.stopPropagation());
+      group.addEventListener('click', () => {
+        if (this.selection?.type === 'object') this.onMeasureClearance?.(this.selection.id, clearance.side);
+      });
+      group.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        if (this.selection?.type === 'object') this.onMeasureClearance?.(this.selection.id, clearance.side);
+      });
+      this.svg.append(group);
+    }
+  }
+
+  private projectObjectOnWall(object: RoomObject, elevation: WallElevation): { offset: number; width: number; top: number; distance: number; clipped: boolean } | null {
     const mountedElevation = object.wallMount ? wallElevation(this.room, object.wallMount.wallId) : null;
     if (object.wallMount && mountedElevation && elevation.wallIds.includes(object.wallMount.wallId)) {
       const point = pointOnWall(mountedElevation, object.wallMount.offsetMeters);
       const direction = mountedElevation.axis.xMeters * elevation.axis.xMeters + mountedElevation.axis.yMeters * elevation.axis.yMeters;
-      return { offset: (point.xMeters - elevation.start.xMeters) * elevation.axis.xMeters + (point.yMeters - elevation.start.yMeters) * elevation.axis.yMeters - (direction < 0 ? object.widthMeters : 0), width: object.widthMeters, top: -object.wallMount.elevationMeters - object.heightMeters, distance: 0 };
+      const offset = (point.xMeters - elevation.start.xMeters) * elevation.axis.xMeters + (point.yMeters - elevation.start.yMeters) * elevation.axis.yMeters - (direction < 0 ? object.widthMeters : 0);
+      return { offset, width: object.widthMeters, top: -object.wallMount.elevationMeters - object.heightMeters, distance: 0, clipped: offset < -0.000001 || offset + object.widthMeters > elevation.length + 0.000001 };
     }
     if (!mountedElevation && (object.xMeters === undefined || object.yMeters === undefined)) return null;
     const points = this.room.points.length ? this.room.points : this.room.walls.flatMap((wall) => [wall.start, wall.end]);
@@ -1321,7 +1439,8 @@ export class FloorPlanEditor {
     const offset = Math.max(0, Math.min(...offsets));
     const end = Math.min(elevation.length, Math.max(...offsets));
     if (end <= offset || maxDistance < 0 || minDistance > Math.abs(centerDistance)) return null;
-    return { offset, width: end - offset, top: -(object.wallMount?.elevationMeters ?? object.elevationMeters ?? 0) - object.heightMeters, distance: Math.max(0, minDistance) };
+    const clipped = Math.min(...offsets) < -0.000001 || Math.max(...offsets) > elevation.length + 0.000001;
+    return { offset, width: end - offset, top: -(object.wallMount?.elevationMeters ?? object.elevationMeters ?? 0) - object.heightMeters, distance: Math.max(0, minDistance), clipped };
   }
 
   private renderGeometryOnly(): void {

@@ -4,7 +4,7 @@ import { cloneParts, partBounds, type ObjectDefinition } from './domain/furnitur
 import { ObjectsPage } from './objects/objects-page';
 import { LocalStorageProjectRepository, type RepositoryWarning } from './data/local-storage-repository';
 import { createId, createProject, createRoom, DEFAULT_DOOR_HEIGHT_METERS, DEFAULT_WINDOW_HEIGHT_METERS, type EditingLayer, type PhotoAnnotation, type Project, type ProjectPhoto, type ProjectSummary, type Room } from './domain/models';
-import { FloorPlanEditor, type EditorSelection } from './editor/floor-plan-editor';
+import { FloorPlanEditor, type ClearanceSide, type EditorSelection } from './editor/floor-plan-editor';
 import { deriveOpeningSegments, distanceBetween, formatLength, openingArea, polygonIssues, roomArea, roomHeight, roomVolume, wallArea, type OpeningSegmentKey } from './geometry';
 import { BoschLaserMeasureAdapter } from './bluetooth/bosch-laser-measure-adapter';
 import { clearCustomBoschProfile, loadCustomBoschProfile, loadCustomBoschProfileSettings, saveCustomBoschProfile, type BoschPayloadFormat } from './bluetooth/custom-bosch-profile';
@@ -43,7 +43,8 @@ export class SiteMeasureApp {
   private bluetoothDetail = '';
   private deviceExplorer: DeviceExplorer | null = null;
   private explorerLog: string[] = [];
-  private measurementPanelContext: { project: Project; room: Room; wall: Project['buildings'][number]['floors'][number]['rooms'][number]['walls'][number] } | null = null;
+  private measurementPanelContext: { project: Project; room: Room; wall?: Project['buildings'][number]['floors'][number]['rooms'][number]['walls'][number]; clearanceSide?: ClearanceSide } | null = null;
+  private clearanceMeasurement: { objectId: string; side: ClearanceSide; content: HTMLElement } | null = null;
   private readonly objectsPage = new ObjectsPage(new ObjectLibrary(localStorage), {
     layer: () => this.layer === 'technician' ? 'technician' : 'designer',
     projects: () => this.repository.list().map((summary) => ({ id: summary.id, name: summary.name })),
@@ -290,6 +291,7 @@ export class SiteMeasureApp {
       onSelection: (selection) => this.updateInspector(selection),
       onMeasure: (wall) => this.showMeasurementDialog(project, active, wall),
       onMeasureObject: (id) => { const room = this.activeRoom(project); if (room) this.showObjectDialog(project, room, id); },
+      onMeasureClearance: (id, side) => { const room = this.activeRoom(project); if (room) this.showClearanceDialog(project, room, id, side); },
       onOpening: (kind, id) => this.showOpeningDialog(project, kind, id),
     });
     canvas.append(hierarchy, this.activeEditor.element);
@@ -416,6 +418,15 @@ export class SiteMeasureApp {
         if (!object.wallMount && object.xMeters !== undefined && object.yMeters !== undefined) actions.append(button('Rotate 90°', 'button quiet', () => this.activeEditor?.rotateSelection()));
         actions.append(button('Delete', 'button danger', () => this.activeEditor?.deleteSelection()));
         inspector.append(readout, button('Measure or set size', 'button primary stretch', () => this.showObjectDialog(project, room, object.id)), actions);
+        const clearances = this.activeEditor?.getSelectedClearances() ?? [];
+        if (clearances.length) {
+          const distances = element('div', 'selection-actions');
+          for (const clearance of clearances) {
+            const label = clearance.side === 'left' || clearance.side === 'right' ? `${clearance.side} wall` : clearance.side;
+            distances.append(button(`${label[0].toUpperCase()}${label.slice(1)}: ${formatLength(Math.max(0, clearance.valueMeters), project.preferredUnits)}`, 'button quiet', () => this.showClearanceDialog(project, room, object.id, clearance.side)));
+          }
+          inspector.append(distances);
+        }
         if (object.wallMount) {
           inspector.append(this.wallMountFields(project, object.id, object.wallMount));
           actions.append(button('Remove from wall', 'button quiet', () => this.activeEditor?.detachObjectFromWall(object.id)));
@@ -621,11 +632,46 @@ export class SiteMeasureApp {
     this.openDialog(dialog);
   }
 
-  private bluetoothPanel(project: Project, room: Room, wall?: Project['buildings'][number]['floors'][number]['rooms'][number]['walls'][number]): HTMLElement {
+  private showClearanceDialog(project: Project, room: Room, objectId: string, side: ClearanceSide): void {
+    const clearance = this.activeEditor?.getSelectedClearances().find((candidate) => candidate.side === side);
+    if (!clearance) return;
+    const dialog = this.dialog();
+    const content = element('div', 'dialog-content');
+    const label = side === 'left' || side === 'right' ? `${side} wall` : side;
+    content.append(element('p', 'eyebrow', room.name), element('h2', 'dialog-title', `Distance to ${label}`));
+    const field = document.createElement('label');
+    field.className = 'field';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.inputMode = 'decimal';
+    const factor = project.preferredUnits === 'imperial' ? 3.280839895 : 1;
+    input.value = (Math.max(0, clearance.valueMeters) * factor).toFixed(project.preferredUnits === 'imperial' ? 2 : 3);
+    field.append(element('span', 'field-label', `Distance in ${project.preferredUnits === 'imperial' ? 'feet' : 'meters'}`), input);
+    const error = element('p', 'field-error');
+    error.setAttribute('role', 'alert');
+    const actions = element('div', 'dialog-actions');
+    actions.append(button('Cancel', 'button quiet', () => dialog.close()));
+    actions.append(button('Apply', 'button primary', () => {
+      const meters = parseDecimalInput(input.value) / factor;
+      const applied = this.activeEditor?.applyObjectClearance(side, { id: createId(), targetType: 'other', targetId: objectId, valueMeters: meters, capturedAt: new Date().toISOString(), source: 'manual' });
+      if (!applied) {
+        error.textContent = 'Enter a positive distance that places the object within the wall and room height.';
+        return;
+      }
+      if (this.saveState !== 'error') dialog.close();
+    }));
+    this.clearanceMeasurement = { objectId, side, content };
+    this.measurementPanelContext = { project, room, clearanceSide: side };
+    content.append(field, error, this.bluetoothPanel(project, room, undefined, side), actions);
+    dialog.replaceChildren(content);
+    this.openDialog(dialog);
+  }
+
+  private bluetoothPanel(project: Project, room: Room, wall?: Project['buildings'][number]['floors'][number]['rooms'][number]['walls'][number], clearanceSide?: ClearanceSide): HTMLElement {
     const panel = element('section', 'bluetooth-panel');
     panel.dataset.bluetoothPanel = 'true';
     panel.append(element('h3', '', 'Laser measure'));
-    const target = wall ? 'Selected wall' : 'Active room';
+    const target = clearanceSide ? `${clearanceSide} clearance` : (wall ? 'Selected wall' : 'Active room');
     panel.append(element('p', 'bluetooth-target', `Target: ${room.name} · ${target}`));
     const stateRow = element('div', 'bluetooth-status');
     stateRow.append(element('span', 'bluetooth-state', this.bluetoothStateLabel()), element('span', 'bluetooth-device', this.bluetoothAdapter?.deviceName || this.bluetoothProvider.label));
@@ -662,7 +708,10 @@ export class SiteMeasureApp {
         readout.append(element('span', '', `#${capture.sequence} · ${capture.deviceName}`));
         readout.append(element('time', '', formatTime(capture.capturedAt)));
         const actions = element('div', 'capture-row-actions');
-        actions.append(button('Apply', 'button primary compact', () => this.applyBluetoothCapture(project, room, wall, capture.id)));
+        actions.append(button('Apply', 'button primary compact', () => {
+          if (clearanceSide) this.applyClearanceCapture(capture.id);
+          else this.applyBluetoothCapture(project, room, wall, capture.id);
+        }));
         actions.append(button('Retry', 'button quiet compact', () => {
           this.bluetoothCapture.discard(capture.id);
           void this.connectLaserMeasure();
@@ -701,6 +750,10 @@ export class SiteMeasureApp {
 
   private receiveBluetoothMeasurement(reading: ParsedMeasurement): void {
     const capture = this.bluetoothCapture.receive(reading);
+    if (this.dialog().open && this.clearanceMeasurement?.content.isConnected) {
+      this.applyClearanceCapture(capture.id);
+      return;
+    }
     const selection = this.editorSelection;
     if (this.view === 'plan' && selection && selection.type !== 'room' && this.activeEditor) {
       const applied = this.activeEditor.applySelectedMeasurement({
@@ -721,6 +774,21 @@ export class SiteMeasureApp {
       this.showToast('Measurement could not resize the selected item');
     } else {
       this.showToast('Measurement received');
+    }
+    this.refreshBluetoothSurfaces();
+  }
+
+  private applyClearanceCapture(captureId: string): void {
+    const context = this.clearanceMeasurement;
+    const capture = this.bluetoothCapture.list().find((candidate) => candidate.id === captureId);
+    if (!context || !context.content.isConnected || !capture) return;
+    const applied = this.activeEditor?.applyObjectClearance(context.side, { id: capture.id, targetType: 'other', targetId: context.objectId, valueMeters: capture.valueMeters, capturedAt: capture.capturedAt, source: 'bluetooth', deviceName: capture.deviceName });
+    if (applied) {
+      this.bluetoothCapture.discard(capture.id);
+      if (this.saveState !== 'error') this.dialog().close();
+      this.showToast('Measurement applied');
+    } else {
+      this.showToast('Measurement does not fit within the wall or room height');
     }
     this.refreshBluetoothSurfaces();
   }
@@ -875,8 +943,8 @@ export class SiteMeasureApp {
   private refreshBluetoothSurfaces(): void {
     const panel = this.dialog().open ? this.dialog().querySelector<HTMLElement>('[data-bluetooth-panel]') : null;
     if (this.measurementPanelContext && panel) {
-      const { project, room, wall } = this.measurementPanelContext;
-      panel.replaceWith(this.bluetoothPanel(project, room, wall));
+      const { project, room, wall, clearanceSide } = this.measurementPanelContext;
+      panel.replaceWith(this.bluetoothPanel(project, room, wall, clearanceSide));
       return;
     }
     if (this.view === 'measure') this.render();

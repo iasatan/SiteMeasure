@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
+import * as THREE from 'three';
 import { SiteMeasureApp } from '../src/app';
 import { LocalStorageProjectRepository } from '../src/data/local-storage-repository';
 import { createProject, createRoom } from '../src/domain/models';
 import { FloorPlanEditor } from '../src/editor/floor-plan-editor';
 import { csvCell, floorPlanSvg, measurementsCsv, printableReport } from '../src/reports/project-exports';
 import { roomViewerHtml } from '../src/reports/room-viewer-export';
-import { createRoomPreview, wallViewGeometry } from '../src/reports/room-visualization';
+import { createRoomPreview, createRoomScene, wallViewGeometry } from '../src/reports/room-visualization';
 
 vi.mock('../src/reports/room-visualization', async (importOriginal) => ({
   ...await importOriginal<typeof import('../src/reports/room-visualization')>(),
@@ -13,6 +14,44 @@ vi.mock('../src/reports/room-visualization', async (importOriginal) => ({
 }));
 
 describe('project reports', () => {
+  it('builds the wall above and below split windows and above split doors', () => {
+    const room = createRoom();
+    room.points = [{ xMeters: 0, yMeters: 0 }, { xMeters: 5, yMeters: 0 }, { xMeters: 5, yMeters: 3 }];
+    room.walls = [
+      { id: 'left', start: room.points[0], end: { xMeters: 1, yMeters: 0 }, thicknessMeters: 0.15 },
+      { id: 'middle', start: { xMeters: 2, yMeters: 0 }, end: { xMeters: 3, yMeters: 0 }, thicknessMeters: 0.15 },
+      { id: 'right', start: { xMeters: 4, yMeters: 0 }, end: room.points[1], thicknessMeters: 0.15 },
+    ];
+    room.windows = [{ id: 'window', wallId: 'left', rightWallId: 'middle', offsetMeters: 1, widthMeters: 1 }];
+    room.doors = [{ id: 'door', wallId: 'middle', rightWallId: 'right', offsetMeters: 1, widthMeters: 1 }];
+    const scene = createRoomScene(room);
+    const wallMeshes = (id: string) => scene.children.find((child) => child.userData.wallId === id)!.children as THREE.Mesh<THREE.BoxGeometry>[];
+    const windowWall = wallMeshes('left');
+    expect(windowWall).toHaveLength(3);
+    expect(windowWall[1].geometry.parameters.height).toBeCloseTo(0.9);
+    expect(windowWall[1].position.y).toBeCloseTo(0.45);
+    expect(windowWall[2].geometry.parameters.height).toBeCloseTo(0.6);
+    expect(windowWall[2].position.y).toBeCloseTo(2.4);
+    const doorWall = wallMeshes('middle');
+    expect(doorWall).toHaveLength(2);
+    expect(doorWall[1].geometry.parameters.height).toBeCloseTo(0.6);
+    expect(doorWall[1].position.y).toBeCloseTo(2.4);
+  });
+
+  it('renders legacy openings with the correct door height and a room-height-clamped window sill', () => {
+    const room = createRoom();
+    room.heightMeters = 2;
+    room.points = [{ xMeters: 0, yMeters: 0 }, { xMeters: 5, yMeters: 0 }, { xMeters: 5, yMeters: 3 }];
+    room.walls = [{ id: 'wall', start: room.points[0], end: room.points[1], thicknessMeters: 0.15 }];
+    room.doors = [{ id: 'door', wallId: 'wall', offsetMeters: 0.5, widthMeters: 1 }];
+    room.windows = [{ id: 'window', wallId: 'wall', offsetMeters: 2, widthMeters: 1, heightMeters: 1.8 }];
+    const wall = createRoomScene(room).children.find((child) => child.userData.wallId === 'wall')!;
+    const meshes = wall.children as THREE.Mesh<THREE.BoxGeometry>[];
+    expect(meshes).toHaveLength(4);
+    expect(meshes[2].geometry.parameters.height).toBeCloseTo(0.2);
+    expect(meshes[2].position.y).toBeCloseTo(0.1);
+  });
+
   it('opens and reloads the 3D view with current editor data', async () => {
     const project = createProject('Current room');
     const room = project.buildings[0].floors[0].rooms[0];

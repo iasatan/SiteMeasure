@@ -2,7 +2,7 @@ import type { Project, Room } from '../domain/models';
 import { distanceBetween, openingArea, polygonIssues, roomArea, roomHeight, roomVolume, wallArea } from '../geometry';
 
 export function measurementsCsv(project: Project): string {
-  const rows: string[][] = [['Project', 'Building', 'Floor', 'Room', 'Target type', 'Target ID', 'Value (m)', 'Captured at', 'Source', 'Device']];
+  const rows: string[][] = [['Project', 'Building', 'Floor', 'Room', 'Target type', 'Target ID', 'Value (m)', 'Captured at', 'Source', 'Device', 'Clearance side', 'Wall ID']];
   for (const building of project.buildings) {
     for (const floor of building.floors) {
       for (const room of floor.rooms) {
@@ -10,7 +10,7 @@ export function measurementsCsv(project: Project): string {
           rows.push([
             project.name, building.name, floor.name, room.name, measurement.targetType, measurement.targetId,
             measurement.valueMeters.toFixed(3), measurement.capturedAt, measurement.source,
-            measurement.deviceName ?? '',
+            measurement.deviceName ?? '', measurement.clearance?.side ?? '', measurement.clearance?.wallId ?? '',
           ]);
         }
       }

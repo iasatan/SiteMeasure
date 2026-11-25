@@ -24,6 +24,7 @@ describe('project files', () => {
     room.walls.push({ id: 'wall-original', start: { xMeters: 0, yMeters: 0 }, end: { xMeters: 3, yMeters: 0 }, thicknessMeters: 0.15 });
     room.doors.push({ id: 'door-original', wallId: 'wall-original', offsetMeters: 1, widthMeters: 0.9 });
     room.objects.push({ id: 'socket', name: 'Socket', layer: 'technician', widthMeters: 0.1, depthMeters: 0.1, heightMeters: 0.1, wallMount: { wallId: 'wall-original', offsetMeters: 1, elevationMeters: 0.3 } });
+    room.measurements.push({ id: 'measure', targetType: 'other', targetId: 'socket', valueMeters: 1, capturedAt: '2026-01-01T00:00:00Z', source: 'manual', clearance: { side: 'left', wallId: 'wall-original' } });
     const copied = copyImportedProject(project);
     const copiedRoom = copied.buildings[0].floors[0].rooms[0];
 
@@ -34,6 +35,8 @@ describe('project files', () => {
     expect(copiedRoom.walls[0].id).not.toBe(room.walls[0].id);
     expect(copiedRoom.doors[0].wallId).toBe(copiedRoom.walls[0].id);
     expect(copiedRoom.objects[0].wallMount).toEqual({ wallId: copiedRoom.walls[0].id, offsetMeters: 1, elevationMeters: 0.3 });
+    expect(copiedRoom.measurements[0].clearance).toEqual({ side: 'left', wallId: copiedRoom.walls[0].id });
+    expect(copiedRoom.measurements[0].targetId).toBe(copiedRoom.objects[0].id);
     expect(parseProjectFile(serializeProject(project)).project.buildings[0].floors[0].rooms[0].objects[0].wallMount).toEqual(room.objects[0].wallMount);
   });
 

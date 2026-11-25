@@ -221,11 +221,13 @@ function remapRoomIds(room: Project['buildings'][number]['floors'][number]['room
     if (window.rightWallId) window.rightWallId = mappedId(idMap, window.rightWallId);
   });
   room.objects.forEach((object) => {
+    object.id = mappedId(idMap, object.id);
     if (object.wallMount) object.wallMount.wallId = mappedId(idMap, object.wallMount.wallId);
   });
   room.measurements.forEach((measurement) => {
     measurement.id = mappedId(idMap, measurement.id);
     measurement.targetId = mappedId(idMap, measurement.targetId);
+    if (measurement.clearance) measurement.clearance.wallId = mappedId(idMap, measurement.clearance.wallId);
   });
   room.photos.forEach((photo) => {
     photo.id = mappedId(idMap, photo.id);
