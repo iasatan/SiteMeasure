@@ -54,7 +54,6 @@ export interface ParsedMeasurement {
   valueMeters: number;
   capturedAt: string;
   deviceName: string;
-  simulated?: boolean;
 }
 
 export interface MeasurementParserContext {
@@ -63,7 +62,7 @@ export interface MeasurementParserContext {
 }
 
 export interface LaserMeasureAdapter {
-  readonly providerId: BluetoothProvider['id'] | 'fake';
+  readonly providerId: BluetoothProvider['id'];
   readonly deviceName: string | null;
   connect(onMeasurement: (measurement: ParsedMeasurement) => void, onState: (state: BluetoothConnectionState, detail?: string) => void): Promise<void>;
   readCurrentMeasurement?(): Promise<void>;

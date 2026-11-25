@@ -2,7 +2,7 @@ import type { Project, Room } from '../domain/models';
 import { distanceBetween, openingArea, polygonIssues, roomArea, roomHeight, roomVolume, wallArea } from '../geometry';
 
 export function measurementsCsv(project: Project): string {
-  const rows: string[][] = [['Project', 'Building', 'Floor', 'Room', 'Target type', 'Target ID', 'Value (m)', 'Captured at', 'Source', 'Device', 'Simulated']];
+  const rows: string[][] = [['Project', 'Building', 'Floor', 'Room', 'Target type', 'Target ID', 'Value (m)', 'Captured at', 'Source', 'Device']];
   for (const building of project.buildings) {
     for (const floor of building.floors) {
       for (const room of floor.rooms) {
@@ -10,7 +10,7 @@ export function measurementsCsv(project: Project): string {
           rows.push([
             project.name, building.name, floor.name, room.name, measurement.targetType, measurement.targetId,
             measurement.valueMeters.toFixed(3), measurement.capturedAt, measurement.source,
-            measurement.deviceName ?? '', measurement.simulated ? 'yes' : 'no',
+            measurement.deviceName ?? '',
           ]);
         }
       }
@@ -73,7 +73,7 @@ export function printableReport(project: Project): string {
 
 function reportRoom(project: Project, building: string, floor: string, room: Room): string {
   const issues = polygonIssues(room.points).filter(() => room.points.length > 0);
-  const measurements = room.measurements.map((measurement) => `<div class="measurement"><strong>${measurement.valueMeters.toFixed(3)} m</strong> · ${escapeHtml(measurement.source)} · ${escapeHtml(new Date(measurement.capturedAt).toLocaleString())}${measurement.simulated ? ' · SIMULATED' : ''}</div>`).join('');
+  const measurements = room.measurements.map((measurement) => `<div class="measurement"><strong>${measurement.valueMeters.toFixed(3)} m</strong> · ${escapeHtml(measurement.source)} · ${escapeHtml(new Date(measurement.capturedAt).toLocaleString())}</div>`).join('');
   const notes = room.notes.map((note) => `<p class="note">${escapeHtml(note)}</p>`).join('');
   const photos = room.photos.map((photo) => {
     const annotations = photo.annotations.map((annotation) => {

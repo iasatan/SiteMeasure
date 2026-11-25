@@ -2,8 +2,6 @@ import type { Measurement, Room } from '../domain/models';
 import { createId } from '../domain/models';
 import type { ParsedMeasurement } from './types';
 
-export type CaptureMode = 'confirmation' | 'rapid';
-
 export interface PendingCapture extends ParsedMeasurement {
   id: string;
   sequence: number;
@@ -12,12 +10,10 @@ export interface PendingCapture extends ParsedMeasurement {
 export class MeasurementCapture {
   private sequence = 0;
   private queue: PendingCapture[] = [];
-  mode: CaptureMode = 'confirmation';
 
   receive(measurement: ParsedMeasurement): PendingCapture {
     const pending = { ...measurement, id: createId(), sequence: ++this.sequence };
-    if (this.mode === 'confirmation') this.queue = [pending];
-    else this.queue.push(pending);
+    this.queue = [pending];
     return pending;
   }
 
@@ -40,7 +36,6 @@ export class MeasurementCapture {
       capturedAt: capture.capturedAt,
       source: 'bluetooth',
       deviceName: capture.deviceName,
-      simulated: capture.simulated,
     };
     room.measurements.push(measurement);
     this.discard(capture.id);

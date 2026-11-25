@@ -1,4 +1,4 @@
-import { createId, DEFAULT_DOOR_HEIGHT_METERS, DEFAULT_WINDOW_HEIGHT_METERS, type Door, type EditingLayer, type Point, type Room, type RoomObject, type Wall, type Window } from '../domain/models';
+import { createId, DEFAULT_DOOR_HEIGHT_METERS, DEFAULT_WINDOW_HEIGHT_METERS, type Door, type EditingLayer, type Measurement, type Point, type Room, type RoomObject, type Wall, type Window } from '../domain/models';
 import { cornerAngleDegrees, distanceBetween, formatLength, nearestPointOnSegment, perpendicularPoint, pointOnWall, polygonIssues, roomArea, roomHeight, setCornerAngle, snapPoint, wallElevation } from '../geometry';
 
 export type EditorTool = 'select' | 'wall' | 'room' | 'door' | 'window' | 'object' | 'measure';
@@ -256,12 +256,29 @@ export class FloorPlanEditor {
     return this.selectedWall() ? structuredClone(this.selectedWall() as Wall) : null;
   }
 
-  setWallLength(lengthMeters: number): void {
+  setWallLength(lengthMeters: number, measurement?: Measurement): boolean {
     const wall = this.selectedWall();
-    if (!wall || lengthMeters <= 0) return;
+    if (!wall || wall.locked || !Number.isFinite(lengthMeters) || lengthMeters <= 0) return false;
     this.beginAction();
     this.resizeWall(wall, lengthMeters);
-    this.commitAction();
+    this.commitAction(measurement);
+    return true;
+  }
+
+  applySelectedMeasurement(measurement: Measurement): boolean {
+    const selection = this.selection;
+    const value = measurement.valueMeters;
+    if (!selection || selection.type === 'room' || selection.id !== measurement.targetId || !Number.isFinite(value) || value < 0.001 || value > 1_000_000 || !this.canEditSelection(selection)) return false;
+    if (selection.type === 'wall') {
+      const wall = this.selectedWall();
+      if (!wall || wall.locked) return false;
+      this.setWallLength(value, measurement);
+      return true;
+    }
+    if (selection.type === 'object') return value <= 1000 && this.updateObject(selection.id, { widthMeters: value }, measurement);
+    const found = this.getOpening(selection.type, selection.id);
+    if (!found) return false;
+    return this.updateOpening(selection.type, selection.id, distanceBetween(found.wall.start, found.wall.end), found.opening.offsetMeters, value, undefined, measurement);
   }
 
   getCornerAngle(): number | null {
@@ -296,7 +313,7 @@ export class FloorPlanEditor {
     return structuredClone({ opening, wall: leftWall });
   }
 
-  updateOpening(kind: OpeningKind, id: string, wallLengthMeters: number, offsetMeters: number, widthMeters: number, heightMeters?: number): boolean {
+  updateOpening(kind: OpeningKind, id: string, wallLengthMeters: number, offsetMeters: number, widthMeters: number, heightMeters?: number, measurement?: Measurement): boolean {
     if (!this.canEditSelection({ type: kind, id })) return false;
     const openings = kind === 'door' ? this.room.doors : this.room.windows;
     const opening = openings.find((candidate) => candidate.id === id);
@@ -311,7 +328,7 @@ export class FloorPlanEditor {
     opening.offsetMeters = offsetMeters;
     opening.widthMeters = widthMeters;
     if (heightMeters !== undefined) opening.heightMeters = heightMeters;
-    this.commitAction();
+    this.commitAction(measurement);
     return true;
   }
 
@@ -774,7 +791,7 @@ export class FloorPlanEditor {
     this.commitAction();
   }
 
-  updateObject(id: string, changes: Partial<Pick<RoomObject, 'name' | 'widthMeters' | 'depthMeters' | 'heightMeters'>>): boolean {
+  updateObject(id: string, changes: Partial<Pick<RoomObject, 'name' | 'widthMeters' | 'depthMeters' | 'heightMeters'>>, measurement?: Measurement): boolean {
     const object = this.room.objects.find((candidate) => candidate.id === id);
     if (!object || !this.canEditSelection({ type: 'object', id })) return false;
     const elevation = object.wallMount ? wallElevation(this.room, object.wallMount.wallId) : null;
@@ -785,7 +802,7 @@ export class FloorPlanEditor {
       object.wallMount.offsetMeters = Math.min(object.wallMount.offsetMeters, elevation.length - object.widthMeters);
       object.wallMount.elevationMeters = Math.min(object.wallMount.elevationMeters, roomHeight(this.room) - object.heightMeters);
     }
-    this.commitAction();
+    this.commitAction(measurement);
     return true;
   }
 
@@ -974,9 +991,10 @@ export class FloorPlanEditor {
     this.redoStack = [];
   }
 
-  private commitAction(): void {
+  private commitAction(measurement?: Measurement): void {
     this.syncSplitOpenings();
     this.syncMountedObjects();
+    if (measurement) this.room.measurements.push(measurement);
     this.onChange(structuredClone(this.room), true);
     this.render();
   }

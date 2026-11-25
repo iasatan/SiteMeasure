@@ -27,6 +27,21 @@ function rectangleEditor(): EditorInternals {
 const loop = (editor: EditorInternals) => editor.room.walls.map((wall) => [wall.start.xMeters, wall.start.yMeters, wall.end.xMeters, wall.end.yMeters].map((value) => Math.round(value * 1000) / 1000));
 
 describe('floor plan editor', () => {
+  it('applies device measurements to selected walls, openings and objects', () => {
+    const editor = rectangleEditor() as EditorInternals & { applySelectedMeasurement(measurement: { id: string; targetType: 'wall' | 'other'; targetId: string; valueMeters: number; capturedAt: string; source: 'bluetooth' }): boolean; getRoom(): ReturnType<typeof createRoom> };
+    const measurement = (targetId: string, valueMeters: number) => ({ id: targetId, targetType: targetId === 'w0' ? 'wall' as const : 'other' as const, targetId, valueMeters, capturedAt: '2026-01-01T00:00:00Z', source: 'bluetooth' as const });
+    editor.selection = { type: 'wall', id: 'w0' };
+    expect(editor.applySelectedMeasurement(measurement('w0', 3))).toBe(true);
+    expect(loop(editor)[0]).toEqual([0, 0, 3, 0]);
+    editor.addDoorToSelectedWall(1);
+    const door = editor.getRoom().doors[0];
+    editor.selection = { type: 'door', id: door.id };
+    expect(editor.applySelectedMeasurement(measurement(door.id, 0.8))).toBe(true);
+    expect(editor.getRoom().doors[0].widthMeters).toBeCloseTo(0.8);
+    expect(editor.applySelectedMeasurement(measurement(door.id, 4))).toBe(false);
+    expect(editor.getRoom().measurements).toHaveLength(2);
+  });
+
   it('picks the nearest editable geometry within a screen-sized tolerance', () => {
     const room = createRoom();
     room.walls = [

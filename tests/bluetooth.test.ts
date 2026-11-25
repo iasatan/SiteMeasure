@@ -3,7 +3,10 @@ import { providerForEnvironment } from '../src/bluetooth/providers/select-blueto
 import { validateBoschProfile, type BoschDeviceProfile } from '../src/bluetooth/profiles/bosch-device-profile';
 import { createCustomBoschProfile, loadCustomBoschProfileSettings, saveCustomBoschProfile } from '../src/bluetooth/custom-bosch-profile';
 import { MeasurementCapture } from '../src/bluetooth/measurement-capture';
-import { createRoom } from '../src/domain/models';
+import { createProject, createRoom } from '../src/domain/models';
+import { SiteMeasureApp } from '../src/app';
+import { LocalStorageProjectRepository } from '../src/data/local-storage-repository';
+import type { ParsedMeasurement } from '../src/bluetooth/types';
 
 const validProfile: BoschDeviceProfile = {
   profileId: 'test-profile',
@@ -78,7 +81,75 @@ describe('custom Bosch profiles', () => {
 });
 
 describe('measurement capture', () => {
-  it('keeps one unconfirmed value in confirmation mode', () => {
+  it('applies incoming readings to the selected plan item and persists them', () => {
+    const repository = new LocalStorageProjectRepository(localStorage);
+    const project = createProject('Device measurement');
+    const room = project.buildings[0].floors[0].rooms[0];
+    room.walls = [{ id: 'wall', start: { xMeters: 0, yMeters: 0 }, end: { xMeters: 4, yMeters: 0 }, thicknessMeters: 0.15 }];
+    room.windows = [{ id: 'window', wallId: 'wall', offsetMeters: 1, widthMeters: 0.8 }];
+    room.objects = [{ id: 'object', name: 'Cabinet', widthMeters: 1, depthMeters: 0.5, heightMeters: 1, xMeters: 1, yMeters: 1 }];
+    repository.save(project);
+    const root = document.createElement('div');
+    document.body.append(root);
+    const app = new SiteMeasureApp(root) as unknown as {
+      openProject(id: string): void;
+      receiveBluetoothMeasurement(reading: ParsedMeasurement): void;
+      bluetoothCapture: MeasurementCapture;
+      activeEditor: { handleSelectionPointer(point: { xMeters: number; yMeters: number }, target: SVGElement | null): void };
+    };
+    app.openProject(project.id);
+    const editor = app.activeEditor;
+    const reading = (valueMeters: number) => ({ valueMeters, capturedAt: '2026-01-01T00:00:00.000Z', deviceName: 'Meter A' });
+    editor.handleSelectionPointer({ xMeters: 2, yMeters: 0 }, root.querySelector<SVGElement>('.editor-wall[data-wall-id="wall"]'));
+    app.receiveBluetoothMeasurement(reading(3));
+    let saved = repository.get(project.id)!.buildings[0].floors[0].rooms[0];
+    expect(saved.walls[0].end.xMeters).toBe(3);
+    expect(saved.measurements[0]).toMatchObject({ targetType: 'wall', targetId: 'wall', valueMeters: 3, source: 'bluetooth' });
+    expect(app.bluetoothCapture.list()).toHaveLength(0);
+
+    editor.handleSelectionPointer({ xMeters: 1.4, yMeters: 0 }, root.querySelector<SVGElement>('[data-opening-id="window"]'));
+    app.receiveBluetoothMeasurement(reading(5));
+    expect(app.bluetoothCapture.list()).toHaveLength(1);
+    app.receiveBluetoothMeasurement(reading(1));
+    saved = repository.get(project.id)!.buildings[0].floors[0].rooms[0];
+    expect(saved.windows[0].widthMeters).toBe(1);
+    expect(saved.measurements[1]).toMatchObject({ targetType: 'other', targetId: 'window', valueMeters: 1 });
+    expect(app.bluetoothCapture.list()).toHaveLength(0);
+
+    const dialog = root.querySelector<HTMLDialogElement>('.app-dialog')!;
+    dialog.setAttribute('open', '');
+    const manualInput = document.createElement('input');
+    manualInput.value = 'draft';
+    dialog.append(manualInput);
+    app.receiveBluetoothMeasurement(reading(0.7));
+    expect(repository.get(project.id)!.buildings[0].floors[0].rooms[0].windows[0].widthMeters).toBe(0.7);
+    expect(manualInput.value).toBe('draft');
+    expect(app.bluetoothCapture.list()).toHaveLength(0);
+
+    dialog.removeAttribute('open');
+    dialog.showModal = () => dialog.setAttribute('open', '');
+    dialog.close = () => dialog.removeAttribute('open');
+    const layer = root.querySelector<HTMLSelectElement>('[aria-label="Editing layer"]')!;
+    layer.value = 'designer';
+    layer.dispatchEvent(new Event('change'));
+    const objectEditor = app.activeEditor;
+    objectEditor.handleSelectionPointer({ xMeters: 1.1, yMeters: 1.1 }, root.querySelector<SVGElement>('.editor-object[data-object-id="object"]'));
+    app.receiveBluetoothMeasurement(reading(1.5));
+    saved = repository.get(project.id)!.buildings[0].floors[0].rooms[0];
+    expect(saved.objects[0].widthMeters).toBe(1.5);
+    expect(saved.measurements.at(-1)).toMatchObject({ targetId: 'object', valueMeters: 1.5, source: 'bluetooth' });
+    root.querySelector<SVGElement>('.editor-object[data-object-id="object"]')!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    expect(dialog.open).toBe(true);
+    const inputs = dialog.querySelectorAll<HTMLInputElement>('input');
+    inputs[1].value = '2';
+    [...dialog.querySelectorAll('button')].find((item) => item.textContent === 'Apply')!.click();
+    saved = repository.get(project.id)!.buildings[0].floors[0].rooms[0];
+    expect(saved.objects[0].widthMeters).toBe(2);
+    expect(saved.measurements.at(-1)).toMatchObject({ targetId: 'object', valueMeters: 2, source: 'manual' });
+    root.remove();
+  });
+
+  it('replaces the pending value with each new reading', () => {
     const capture = new MeasurementCapture();
     const first = capture.receive({ valueMeters: 1.2, capturedAt: '2026-01-01T00:00:00.000Z', deviceName: 'Meter A' });
     const second = capture.receive({ valueMeters: 2.3, capturedAt: '2026-01-01T00:00:01.000Z', deviceName: 'Meter A' });
@@ -86,17 +157,15 @@ describe('measurement capture', () => {
     expect(first.sequence).toBe(1);
   });
 
-  it('queues rapid captures and assigns them only on confirmation', () => {
+  it('applies the newest pending value', () => {
     const capture = new MeasurementCapture();
     const room = createRoom();
-    capture.mode = 'rapid';
-    const first = capture.receive({ valueMeters: 2.5, capturedAt: '2026-01-01T00:00:00.000Z', deviceName: 'Meter A' });
-    const second = capture.receive({ valueMeters: 3.5, capturedAt: '2026-01-01T00:00:01.000Z', deviceName: 'Meter A' });
-    expect(capture.list()).toHaveLength(2);
+    capture.receive({ valueMeters: 2.5, capturedAt: '2026-01-01T00:00:00.000Z', deviceName: 'Meter A' });
+    const latest = capture.receive({ valueMeters: 3.5, capturedAt: '2026-01-01T00:00:01.000Z', deviceName: 'Meter A' });
 
-    const measurement = capture.confirm(first.id, room, 'other', room.id);
-    expect(measurement?.valueMeters).toBe(2.5);
-    expect(capture.list().map((item) => item.id)).toEqual([second.id]);
+    const measurement = capture.confirm(latest.id, room, 'other', room.id);
+    expect(measurement?.valueMeters).toBe(3.5);
+    expect(capture.list()).toHaveLength(0);
     expect(room.measurements).toHaveLength(1);
   });
 });

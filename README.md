@@ -52,13 +52,13 @@ Phases 1 through 4 include:
 - split/join, rotate, duplicate, copy/paste, lock, delete, and undo/redo;
 - door/window placement, dimension labels, manual comma-decimal measurements, and live area/volume calculations;
 - isolated native Web Bluetooth and iOSWebBLE provider selection with manual fallback;
-- fail-closed Bosch protocol profiles, simulated capture, connection states, confirmation, and rapid capture queues;
+- fail-closed Bosch protocol profiles, connection states, and confirmation-based Bluetooth capture with one replaceable pending reading;
 - camera and library photos with 1600px resize, JPEG compression, preview-size confirmation, notes, and annotations;
 - room notes, measurement CSV, room SVG/PNG, printable reports, and photo-free project export;
 - interactive 3D room views and self-contained HTML exports that work offline;
 - static GitHub Pages deployment workflow.
 
-Real Bosch hardware remains disabled until its device identifiers, GATT UUIDs, and packet format are verified. Manual measurements and simulated capture remain available. Backups and the offline service worker remain later-phase work.
+Real Bosch hardware remains disabled until its device identifiers, GATT UUIDs, and packet format are verified. Manual measurements remain available. Backups and the offline service worker remain later-phase work.
 
 ## Deployment
 

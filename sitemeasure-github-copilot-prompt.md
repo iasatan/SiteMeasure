@@ -190,7 +190,7 @@ interface BoschDeviceProfile {
 }
 ```
 
-Provide a fake device adapter for development and automated tests. Simulated measurements must be clearly marked as simulated.
+Do not provide a fake or simulated device adapter.
 
 ## iPhone mini-first UI
 
@@ -271,9 +271,7 @@ Optimize the workflow for a user holding an iPhone in one hand and a Bosch laser
 8. Update calculations immediately.
 9. Save the project automatically to localStorage.
 
-Confirmation mode is the default.
-
-Provide optional Rapid Capture mode, which queues measurements with timestamps and sequence numbers for later assignment. Never silently overwrite an existing value.
+Keep only one pending Bluetooth reading. Every newly received reading replaces the previous pending reading; apply it to the selected target only after confirmation. Never silently overwrite an already-applied measurement.
 
 When a measurement arrives, display:
 
@@ -741,8 +739,8 @@ Implementation phases:
 - implement Bluetooth provider abstraction;
 - integrate iOSWebBLE;
 - implement native and unsupported providers;
-- implement fake adapter and configurable Bosch profiles;
-- implement connection UI, measurement confirmation, rapid capture, and diagnostics;
+- implement configurable Bosch profiles;
+- implement connection UI, measurement confirmation with a single replaceable pending reading, and diagnostics;
 - add tests.
 
 ### Phase 4

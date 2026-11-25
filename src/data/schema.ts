@@ -95,7 +95,6 @@ function validateRoom(value: unknown, path: string): void {
     expectFinite(measurement.valueMeters, `${path}.measurements[${index}].valueMeters`, 0.001, 1_000_000);
     expectIsoDate(measurement.capturedAt, `${path}.measurements[${index}].capturedAt`);
     if (measurement.deviceName !== undefined) expectString(measurement.deviceName, `${path}.measurements[${index}].deviceName`, false);
-    if (measurement.simulated !== undefined && typeof measurement.simulated !== 'boolean') throw new ProjectValidationError(`${path}.measurements[${index}].simulated is invalid.`);
   });
   expectArray(room.photos, `${path}.photos`).forEach((photoValue, index) => {
     const photoPath = `${path}.photos[${index}]`;

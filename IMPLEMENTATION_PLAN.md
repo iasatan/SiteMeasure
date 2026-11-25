@@ -24,9 +24,8 @@
 
 - [x] Add isolated native Web Bluetooth, iOSWebBLE, and unsupported providers with deterministic selection.
 - [x] Add a fail-closed Bosch adapter and validated device-profile boundary with explicit TODO protocol values.
-- [x] Add a simulated laser adapter that marks generated values as simulated.
-- [x] Add confirmation-first capture, retry/cancel controls, rapid queues, timestamps, sequence numbers, and explicit target assignment.
-- [x] Persist confirmed Bluetooth captures and simulated status without requiring Bluetooth for manual entry or project editing.
+- [x] Add confirmation-first capture, retry/cancel controls, timestamps, sequence numbers, and explicit target assignment; each incoming reading replaces the previous pending value.
+- [x] Persist confirmed Bluetooth captures without requiring Bluetooth for manual entry or project editing.
 
 ## Phase 4: Photos and reports
 
@@ -51,7 +50,7 @@ Phase 2 is complete as an executable editor slice. It includes building/floor/ro
 
 ## Phase 3 Completion Notes
 
-Phase 3 is complete as an executable capture slice. It includes provider selection, extension-required handling on iOS Safari, isolated native and iOSWebBLE access, a fail-closed Bosch profile registry and adapter, simulated devices, connection states, confirmation-first measurement application, retry/cancel controls, and rapid capture queues with timestamps and sequence numbers. Real Bosch connections remain disabled until a device profile contains verified identifiers, UUIDs, and packet parsing; no protocol values were guessed.
+Phase 3 is complete as an executable capture slice. It includes provider selection, extension-required handling on iOS Safari, isolated native and iOSWebBLE access, a fail-closed Bosch profile registry and adapter, connection states, confirmation-first measurement application, retry/cancel controls, and a single replaceable pending reading. Real Bosch connections remain disabled until a device profile contains verified identifiers, UUIDs, and packet parsing; no protocol values were guessed.
 
 ## Phase 4 Completion Notes
 

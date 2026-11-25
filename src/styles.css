@@ -135,8 +135,7 @@
     right: 0;
     bottom: 0;
     left: 0;
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    display: flex;
     padding: 5px max(4px, env(safe-area-inset-right)) calc(5px + env(safe-area-inset-bottom)) max(4px, env(safe-area-inset-left));
     border-top: 1px solid var(--line);
     background: color-mix(in srgb, var(--surface-raised) 96%, transparent);
@@ -145,6 +144,7 @@
 
   .nav-item {
     display: grid;
+    flex: 1 1 0;
     place-items: center;
     align-content: center;
     gap: 3px;
@@ -301,8 +301,6 @@
   .bluetooth-status { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
   .bluetooth-state { padding: 4px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--green-2); font-size: 0.68rem; font-weight: 800; text-transform: uppercase; }
   .bluetooth-device { min-width: 0; color: var(--muted); font-size: 0.72rem; overflow-wrap: anywhere; text-align: right; }
-  .capture-mode { display: flex; align-items: center; gap: 8px; min-height: 44px; font-size: 0.8rem; font-weight: 700; }
-  .capture-mode input { width: 22px; height: 22px; accent-color: var(--accent-dark); }
   .bluetooth-actions { display: grid; gap: 7px; }
   .capture-queue { display: grid; gap: 8px; }
   .capture-row { display: grid; gap: 10px; padding: 13px 0; border-top: 1px solid var(--line); }
@@ -416,7 +414,7 @@
     .app-frame { padding-bottom: 0; }
     .app-header { min-height: 70px; padding-inline: 28px; }
     .bottom-nav { position: sticky; top: 70px; bottom: auto; z-index: 19; display: flex; justify-content: center; gap: 8px; padding: 7px 24px; border-bottom: 1px solid var(--line); border-top: 0; }
-    .nav-item { grid-template-columns: auto auto; gap: 7px; min-width: 112px; min-height: 42px; padding: 8px 12px; }
+    .nav-item { flex: 0 0 auto; grid-template-columns: auto auto; gap: 7px; min-width: 112px; min-height: 42px; padding: 8px 12px; }
     .nav-glyph { width: 20px; }
     .project-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .workspace-page { display: grid; grid-template-columns: minmax(0, 1fr) 320px; grid-template-rows: auto minmax(540px, calc(100dvh - 146px)); padding: 0; }
