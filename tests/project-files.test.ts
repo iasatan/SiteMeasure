@@ -6,7 +6,7 @@ import { ProjectValidationError } from '../src/data/schema';
 describe('project files', () => {
   it('round-trips a validated project', () => {
     const project = createProject('River & Oak / 12');
-    project.buildings[0].floors[0].rooms[0].objects.push({ id: 'socket', name: 'Socket', layer: 'technician', widthMeters: 0.1, depthMeters: 0.1, heightMeters: 0.1 });
+    project.buildings[0].floors[0].rooms[0].objects.push({ id: 'socket', name: 'Socket', layer: 'technician', widthMeters: 0.1, depthMeters: 0.1, heightMeters: 0.1, elevationMeters: 0.7, rotationRadians: Math.PI / 2 });
     const restored = parseProjectFile(serializeProject(project)).project;
 
     expect(restored).toEqual(project);

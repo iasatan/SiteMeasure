@@ -27,6 +27,152 @@ function rectangleEditor(): EditorInternals {
 const loop = (editor: EditorInternals) => editor.room.walls.map((wall) => [wall.start.xMeters, wall.start.yMeters, wall.end.xMeters, wall.end.yMeters].map((value) => Math.round(value * 1000) / 1000));
 
 describe('floor plan editor', () => {
+  it('projects objects between the wall and the room center onto wall elevations', () => {
+    const room = createRoom();
+    room.points = [[0, 0], [4, 0], [4, 4], [0, 4]].map(([xMeters, yMeters]) => ({ xMeters, yMeters }));
+    room.walls = room.points.map((start, index) => ({ id: `wall${index}`, start, end: room.points[(index + 1) % 4], thicknessMeters: 0.15 }));
+    room.objects = [
+      { id: 'cabinet', name: 'Cabinet', widthMeters: 1, depthMeters: 0.5, heightMeters: 1.2, xMeters: 1, yMeters: 0.5 },
+      { id: 'behind', name: 'Behind', widthMeters: 1, depthMeters: 0.5, heightMeters: 1, xMeters: 1, yMeters: 3 },
+      { id: 'outside', name: 'Outside', widthMeters: 1, depthMeters: 0.5, heightMeters: 1, xMeters: 5, yMeters: 0.5 },
+    ];
+    const editor = new FloorPlanEditor({ room, layer: 'designer', units: 'metric', onChange: () => {}, onSelection: () => {} });
+    const view = editor.element.querySelector<HTMLSelectElement>('[aria-label="Editor view"]')!;
+    view.value = 'wall0';
+    view.dispatchEvent(new Event('change'));
+    const cabinet = editor.element.querySelector<SVGElement>('.editor-elevation-object[data-object-id="cabinet"]')!;
+    expect(cabinet.getAttribute('x')).toBe('1');
+    expect(cabinet.getAttribute('y')).toBe('-1.2');
+    expect(cabinet.getAttribute('width')).toBe('1');
+    expect(editor.element.querySelector('.editor-elevation-object[data-object-id="behind"]')).toBeNull();
+    expect(editor.element.querySelector('.editor-elevation-object[data-object-id="outside"]')).toBeNull();
+    const internals = editor as unknown as EditorInternals & { handleObjectDrag(point: { xMeters: number; yMeters: number }): void };
+    internals.handleSelectionPointer({ xMeters: 1.5, yMeters: -0.5 }, cabinet);
+    internals.handleObjectDrag({ xMeters: 2, yMeters: -1 });
+    expect(editor.getRoom().objects[0]).toMatchObject({ xMeters: 1.5, yMeters: 0.5, elevationMeters: 0.5 });
+    expect(editor.element.querySelector('[data-resize-object="true"]')).not.toBeNull();
+  });
+
+  it('projects adjacent wall mounts and clipped footprints in depth order', () => {
+    const room = createRoom();
+    room.points = [[0, 0], [4, 0], [4, 4], [0, 4]].map(([xMeters, yMeters]) => ({ xMeters, yMeters }));
+    room.walls = room.points.map((start, index) => ({ id: `wall${index}`, start, end: room.points[(index + 1) % 4], thicknessMeters: 0.15 }));
+    room.objects = [
+      { id: 'foreground', name: 'Chair', widthMeters: 1, depthMeters: 0.5, heightMeters: 1, xMeters: 1, yMeters: 1.5 },
+      { id: 'background', name: 'Table', widthMeters: 1, depthMeters: 0.5, heightMeters: 0.8, xMeters: 1, yMeters: 0.5 },
+      { id: 'side', name: 'Socket', layer: 'technician', widthMeters: 0.1, depthMeters: 0.1, heightMeters: 0.1, wallMount: { wallId: 'wall3', offsetMeters: 3, elevationMeters: 1 } },
+      { id: 'partial', name: 'Shelf', widthMeters: 1, depthMeters: 0.5, heightMeters: 1, xMeters: -0.5, yMeters: 0.5 },
+    ];
+    const editor = new FloorPlanEditor({ room, layer: 'designer', units: 'metric', onChange: () => {}, onSelection: () => {} });
+    const view = editor.element.querySelector<HTMLSelectElement>('[aria-label="Editor view"]')!;
+    view.value = 'wall0';
+    view.dispatchEvent(new Event('change'));
+    const side = editor.element.querySelector<SVGElement>('.editor-elevation-object[data-object-id="side"]')!;
+    expect(side.getAttribute('y')).toBe('-1.1');
+    expect(side.style.pointerEvents).toBe('none');
+    expect(editor.element.querySelector('.editor-elevation-object[data-object-id="partial"]')?.getAttribute('width')).toBe('0.5');
+    const rendered = [...editor.element.querySelectorAll<SVGElement>('.editor-elevation-object')].map((object) => object.dataset.objectId);
+    expect(rendered.indexOf('background')).toBeLessThan(rendered.indexOf('foreground'));
+    view.value = 'wall2';
+    view.dispatchEvent(new Event('change'));
+    expect(editor.element.querySelector('.editor-elevation-object[data-object-id="foreground"]')).not.toBeNull();
+    expect(editor.element.querySelector('.editor-elevation-object[data-object-id="background"]')).toBeNull();
+  });
+
+  it('moves and resizes projected objects using wall coordinates and supports undo', () => {
+    const room = createRoom();
+    room.points = [[0, 0], [4, 0], [4, 4], [0, 4]].map(([xMeters, yMeters]) => ({ xMeters, yMeters }));
+    room.walls = room.points.map((start, index) => ({ id: `wall${index}`, start, end: room.points[(index + 1) % 4], thicknessMeters: 0.15 }));
+    room.objects = [{ id: 'cabinet', name: 'Cabinet', widthMeters: 1, depthMeters: 0.5, heightMeters: 1, xMeters: 1, yMeters: 0.5 }];
+    const changes: ReturnType<typeof createRoom>[] = [];
+    const editor = new FloorPlanEditor({ room, layer: 'designer', units: 'metric', onChange: (changed) => changes.push(changed), onSelection: () => {} });
+    const internals = editor as unknown as EditorInternals & { handleObjectDrag(point: { xMeters: number; yMeters: number }): void; pointerUp(event: { pointerId: number }): void };
+    const view = editor.element.querySelector<HTMLSelectElement>('[aria-label="Editor view"]')!;
+    view.value = 'wall0';
+    view.dispatchEvent(new Event('change'));
+    internals.handleSelectionPointer({ xMeters: 1.5, yMeters: -0.5 }, editor.element.querySelector<SVGElement>('.editor-elevation-object')!);
+    internals.handleObjectDrag({ xMeters: 2, yMeters: -0.8 });
+    internals.pointerUp({ pointerId: 1 });
+    expect(changes.at(-1)?.objects[0]).toMatchObject({ xMeters: 1.5, yMeters: 0.5, elevationMeters: 0.3 });
+    const handle = editor.element.querySelector<SVGElement>('[data-resize-object="true"]')!;
+    internals.handleSelectionPointer({ xMeters: 2.6, yMeters: -1.4 }, handle);
+    internals.handleObjectDrag({ xMeters: 3.1, yMeters: -1.7 });
+    internals.pointerUp({ pointerId: 1 });
+    expect(editor.getRoom().objects[0]).toMatchObject({ widthMeters: 1.5, depthMeters: 0.5, elevationMeters: 0.3 });
+    expect(editor.getRoom().objects[0].heightMeters).toBeCloseTo(1.3);
+    editor.undo();
+    expect(editor.getRoom().objects[0]).toMatchObject({ widthMeters: 1, heightMeters: 1, elevationMeters: 0.3 });
+    editor.redo();
+    expect(editor.getRoom().objects[0].widthMeters).toBe(1.5);
+  });
+
+  it('edits an adjacent wall mount and restores it when undone', () => {
+    const room = createRoom();
+    room.points = [[0, 0], [4, 0], [4, 4], [0, 4]].map(([xMeters, yMeters]) => ({ xMeters, yMeters }));
+    room.walls = room.points.map((start, index) => ({ id: `wall${index}`, start, end: room.points[(index + 1) % 4], thicknessMeters: 0.15 }));
+    room.objects = [{ id: 'socket', name: 'Socket', layer: 'technician', widthMeters: 0.1, depthMeters: 0.1, heightMeters: 0.1, wallMount: { wallId: 'wall3', offsetMeters: 3, elevationMeters: 1 } }];
+    const editor = new FloorPlanEditor({ room, layer: 'technician', units: 'metric', onChange: () => {}, onSelection: () => {} });
+    const internals = editor as unknown as EditorInternals & { handleObjectDrag(point: { xMeters: number; yMeters: number }): void; pointerUp(event: { pointerId: number }): void };
+    const view = editor.element.querySelector<HTMLSelectElement>('[aria-label="Editor view"]')!;
+    view.value = 'wall0';
+    view.dispatchEvent(new Event('change'));
+    internals.handleSelectionPointer({ xMeters: 0.05, yMeters: -1 }, editor.element.querySelector<SVGElement>('.editor-elevation-object')!);
+    expect(editor.element.querySelector('[data-resize-object="true"]')).not.toBeNull();
+    internals.handleObjectDrag({ xMeters: 0.05, yMeters: -1.2 });
+    expect(editor.getRoom().objects[0].wallMount?.elevationMeters).toBe(1.2);
+    internals.handleObjectDrag({ xMeters: 0.55, yMeters: -1.2 });
+    const moved = editor.getRoom().objects[0];
+    expect(moved.wallMount).toBeUndefined();
+    expect(moved.xMeters).toBeCloseTo(0.5);
+    expect(moved.yMeters).toBeCloseTo(1);
+    expect(moved.rotationRadians).toBeCloseTo(-Math.PI / 2);
+    expect(moved.elevationMeters).toBeCloseTo(1.2);
+    internals.pointerUp({ pointerId: 1 });
+    editor.undo();
+    expect(editor.getRoom().objects[0].wallMount).toEqual({ wallId: 'wall3', offsetMeters: 3, elevationMeters: 1 });
+  });
+
+  it('resizes the correct floor dimension on perpendicular and reversed walls', () => {
+    const room = createRoom();
+    room.points = [[0, 0], [4, 0], [4, 4], [0, 4]].map(([xMeters, yMeters]) => ({ xMeters, yMeters }));
+    room.walls = room.points.map((start, index) => ({ id: `wall${index}`, start, end: room.points[(index + 1) % 4], thicknessMeters: 0.15 }));
+    room.objects = [{ id: 'cabinet', name: 'Cabinet', widthMeters: 1, depthMeters: 0.5, heightMeters: 1, xMeters: 3, yMeters: 2.5 }];
+    const editor = new FloorPlanEditor({ room, layer: 'designer', units: 'metric', onChange: () => {}, onSelection: () => {} });
+    const internals = editor as unknown as EditorInternals & { handleObjectDrag(point: { xMeters: number; yMeters: number }): void; pointerUp(event: { pointerId: number }): void };
+    const view = editor.element.querySelector<HTMLSelectElement>('[aria-label="Editor view"]')!;
+    view.value = 'wall1';
+    view.dispatchEvent(new Event('change'));
+    internals.handleSelectionPointer({ xMeters: 2.7, yMeters: -0.5 }, editor.element.querySelector<SVGElement>('.editor-elevation-object')!);
+    internals.handleSelectionPointer({ xMeters: 3.1, yMeters: -1.1 }, editor.element.querySelector<SVGElement>('[data-resize-object="true"]')!);
+    internals.handleObjectDrag({ xMeters: 3.6, yMeters: -1.1 });
+    internals.pointerUp({ pointerId: 1 });
+    expect(editor.getRoom().objects[0]).toMatchObject({ widthMeters: 1, depthMeters: 1, xMeters: 3, yMeters: 2.5 });
+    view.value = 'wall2';
+    view.dispatchEvent(new Event('change'));
+    internals.handleSelectionPointer({ xMeters: 0.5, yMeters: -0.5 }, editor.element.querySelector<SVGElement>('.editor-elevation-object')!);
+    internals.handleSelectionPointer({ xMeters: 1.1, yMeters: -1.1 }, editor.element.querySelector<SVGElement>('[data-resize-object="true"]')!);
+    internals.handleObjectDrag({ xMeters: 1.6, yMeters: -1.1 });
+    internals.pointerUp({ pointerId: 1 });
+    expect(editor.getRoom().objects[0]).toMatchObject({ widthMeters: 1.5, depthMeters: 1, xMeters: 2.5, yMeters: 2.5 });
+  });
+
+  it('marks small objects without drawing labels over their footprint', () => {
+    const room = createRoom();
+    room.objects = [{ id: 'socket', name: 'Socket', layer: 'technician', widthMeters: 0.09, depthMeters: 0.09, heightMeters: 0.09, xMeters: 1, yMeters: 2 }];
+    const editor = new FloorPlanEditor({ room, layer: 'technician', units: 'metric', onChange: () => {}, onSelection: () => {} });
+    const marker = editor.element.querySelector<SVGElement>('.editor-object-marker[data-object-id="socket"]')!;
+    const object = editor.element.querySelector<SVGElement>('.editor-object[data-object-id="socket"]')!;
+    expect(marker.getAttribute('x1')).toBe('1.045');
+    expect(marker.getAttribute('y1')).toBe('2.045');
+    expect(object.querySelector('title')?.textContent).toBe('Socket');
+    expect(marker.querySelector('title')?.textContent).toBe('Socket');
+    expect(editor.element.querySelector('text[data-object-id="socket"]')).toBeNull();
+    const internals = editor as unknown as EditorInternals;
+    internals.handleSelectionPointer({ xMeters: 1.045, yMeters: 2.045 }, marker);
+    expect(internals.selection).toEqual({ type: 'object', id: 'socket' });
+    expect(editor.element.querySelector('.editor-object-marker.is-selected')).not.toBeNull();
+  });
+
   it('applies device measurements to selected walls, openings and objects', () => {
     const editor = rectangleEditor() as EditorInternals & { applySelectedMeasurement(measurement: { id: string; targetType: 'wall' | 'other'; targetId: string; valueMeters: number; capturedAt: string; source: 'bluetooth' }): boolean; getRoom(): ReturnType<typeof createRoom> };
     const measurement = (targetId: string, valueMeters: number) => ({ id: targetId, targetType: targetId === 'w0' ? 'wall' as const : 'other' as const, targetId, valueMeters, capturedAt: '2026-01-01T00:00:00Z', source: 'bluetooth' as const });
@@ -67,6 +213,7 @@ describe('floor plan editor', () => {
     room.objects = [{ id: 'socket', name: 'Socket', layer: 'technician', widthMeters: 0.3, depthMeters: 0.1, heightMeters: 0.2, xMeters: 0, yMeters: 2, wallMount: { wallId: 'wall', offsetMeters: 2, elevationMeters: 1 } }];
     const editor = new FloorPlanEditor({ room, units: 'metric', onChange: () => {}, onSelection: () => {} });
     const internals = editor as unknown as EditorInternals;
+    expect(editor.element.querySelector('.editor-object-marker')?.getAttribute('transform')).toBe(editor.element.querySelector('.editor-object')?.getAttribute('transform'));
     expect(internals.nearestSelectionTarget({ xMeters: 0.05, yMeters: 1.5 }, null)?.dataset.openingId).toBe('door');
     expect(internals.nearestSelectionTarget({ xMeters: -0.05, yMeters: 2.2 }, null)?.dataset.objectId).toBe('socket');
     internals.handleSelectionPointer({ xMeters: 0, yMeters: 0 }, editor.element.querySelector<SVGElement>('.editor-wall[data-wall-id="wall"]')!);

@@ -135,6 +135,8 @@ function validateRoom(value: unknown, path: string): void {
     if (object.layer !== undefined && object.layer !== 'technician' && object.layer !== 'designer') throw new ProjectValidationError(`${path}.objects[${index}].layer is invalid.`);
     for (const key of ['widthMeters', 'depthMeters', 'heightMeters']) expectFinite(object[key], `${path}.objects[${index}].${key}`, 0.001, 1000);
     for (const key of ['xMeters', 'yMeters']) if (object[key] !== undefined) expectFinite(object[key], `${path}.objects[${index}].${key}`, -100000, 100000);
+    if (object.elevationMeters !== undefined) expectFinite(object.elevationMeters, `${path}.objects[${index}].elevationMeters`, 0, 100000);
+    if (object.rotationRadians !== undefined) expectFinite(object.rotationRadians, `${path}.objects[${index}].rotationRadians`);
     if (object.wallMount !== undefined) {
       const mount = expectRecord(object.wallMount, `${path}.objects[${index}].wallMount`);
       expectString(mount.wallId, `${path}.objects[${index}].wallMount.wallId`, false);

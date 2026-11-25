@@ -1,5 +1,5 @@
 import { createId, DEFAULT_DOOR_HEIGHT_METERS, DEFAULT_WINDOW_HEIGHT_METERS, type Door, type EditingLayer, type Measurement, type Point, type Room, type RoomObject, type Wall, type Window } from '../domain/models';
-import { cornerAngleDegrees, distanceBetween, formatLength, nearestPointOnSegment, perpendicularPoint, pointOnWall, polygonIssues, roomArea, roomHeight, setCornerAngle, snapPoint, wallElevation } from '../geometry';
+import { cornerAngleDegrees, distanceBetween, formatLength, nearestPointOnSegment, perpendicularPoint, pointOnWall, polygonIssues, roomArea, roomHeight, setCornerAngle, snapPoint, wallElevation, type WallElevation } from '../geometry';
 
 export type EditorTool = 'select' | 'wall' | 'room' | 'door' | 'window' | 'object' | 'measure';
 export type EditorSelection = { type: 'wall' | 'room' | 'object' | 'door' | 'window'; id: string } | null;
@@ -535,7 +535,7 @@ export class FloorPlanEditor {
     const y = Number(candidate.getAttribute('y'));
     const object = this.room.objects.find((item) => item.id === selection.id);
     const elevation = this.view === 'floor' && object?.wallMount ? wallElevation(this.room, object.wallMount.wallId) : null;
-    const angle = elevation ? Math.atan2(elevation.axis.yMeters, elevation.axis.xMeters) : 0;
+    const angle = elevation ? Math.atan2(elevation.axis.yMeters, elevation.axis.xMeters) : this.view === 'floor' ? object?.rotationRadians ?? 0 : 0;
     const dx = world.xMeters - x;
     const dy = world.yMeters - y;
     const localX = dx * Math.cos(angle) + dy * Math.sin(angle);
@@ -612,6 +612,7 @@ export class FloorPlanEditor {
     if (!this.dragOrigin || this.selection?.type !== 'object' || !this.originalRoom) return false;
     const original = this.originalRoom.objects.find((candidate) => candidate.id === this.selection?.id);
     const object = this.room.objects.find((candidate) => candidate.id === this.selection?.id);
+    if (this.view !== 'floor' && original && object && (!original.wallMount || !wallElevation(this.room, this.view)?.wallIds.includes(original.wallMount.wallId))) return this.handleProjectedObjectDrag(world, original, object);
     if (original?.wallMount && object?.wallMount && this.view !== 'floor') {
       const elevation = wallElevation(this.room, this.view);
       const objectElevation = wallElevation(this.room, original.wallMount.wallId);
@@ -642,6 +643,66 @@ export class FloorPlanEditor {
     } else {
       object.xMeters = moved.xMeters;
       object.yMeters = moved.yMeters;
+    }
+    this.renderGeometryOnly();
+    return true;
+  }
+
+  private handleProjectedObjectDrag(world: Point, original: RoomObject, object: RoomObject): boolean {
+    const elevation = wallElevation(this.room, this.view);
+    if (!elevation || !this.dragOrigin) return true;
+    const deltaX = world.xMeters - this.dragOrigin.xMeters;
+    const deltaY = world.yMeters - this.dragOrigin.yMeters;
+    if (deltaX === 0 && deltaY === 0) {
+      Object.assign(object, structuredClone(original));
+      if (original.elevationMeters === undefined) delete object.elevationMeters;
+      if (original.rotationRadians === undefined) delete object.rotationRadians;
+      this.renderGeometryOnly();
+      return true;
+    }
+    const mountedElevation = original.wallMount ? wallElevation(this.originalRoom!, original.wallMount.wallId) : null;
+    const origin = mountedElevation && original.wallMount ? pointOnWall(mountedElevation, original.wallMount.offsetMeters) : { xMeters: original.xMeters, yMeters: original.yMeters };
+    if (origin.xMeters === undefined || origin.yMeters === undefined) return true;
+    const angle = mountedElevation ? Math.atan2(mountedElevation.axis.yMeters, mountedElevation.axis.xMeters) : original.rotationRadians ?? 0;
+    const axis = { xMeters: Math.cos(angle), yMeters: Math.sin(angle) };
+    const depthAxis = { xMeters: -axis.yMeters, yMeters: axis.xMeters };
+    const bottom = original.wallMount?.elevationMeters ?? original.elevationMeters ?? 0;
+    const horizontalMove = this.resizingObject ? deltaX : this.snap ? Math.round(deltaX * 20) / 20 : deltaX;
+    if (original.wallMount && horizontalMove === 0) {
+      Object.assign(object, structuredClone(original));
+      object.wallMount = structuredClone(original.wallMount);
+      if (original.rotationRadians === undefined) delete object.rotationRadians;
+      if (original.elevationMeters === undefined) delete object.elevationMeters;
+      if (this.resizingObject) object.heightMeters = Math.max(0.01, Math.min(roomHeight(this.room) - bottom, original.heightMeters - deltaY));
+      else object.wallMount.elevationMeters = Math.max(0, Math.min(roomHeight(this.room) - original.heightMeters, this.snap ? Math.round((bottom - deltaY) * 20) / 20 : bottom - deltaY));
+      this.syncMountedObjects();
+      this.renderGeometryOnly();
+      return true;
+    }
+    if (original.wallMount) {
+      delete object.wallMount;
+      object.rotationRadians = angle;
+      object.elevationMeters = bottom;
+    }
+    if (this.resizingObject) {
+      const widthComponent = axis.xMeters * elevation.axis.xMeters + axis.yMeters * elevation.axis.yMeters;
+      const depthComponent = depthAxis.xMeters * elevation.axis.xMeters + depthAxis.yMeters * elevation.axis.yMeters;
+      const horizontalWidth = Math.abs(widthComponent) >= Math.abs(depthComponent);
+      const component = horizontalWidth ? widthComponent : depthComponent;
+      const originalSize = horizontalWidth ? original.widthMeters : original.depthMeters;
+      const size = Math.max(0.01, Math.min(1000, originalSize + deltaX / Math.abs(component)));
+      const sizeAxis = horizontalWidth ? axis : depthAxis;
+      if (horizontalWidth) object.widthMeters = size;
+      else object.depthMeters = size;
+      const shift = component < 0 ? size - originalSize : 0;
+      object.xMeters = origin.xMeters - sizeAxis.xMeters * shift;
+      object.yMeters = origin.yMeters - sizeAxis.yMeters * shift;
+      object.heightMeters = Math.max(0.01, Math.min(roomHeight(this.room) - bottom, original.heightMeters - deltaY));
+    } else {
+      object.xMeters = origin.xMeters + elevation.axis.xMeters * horizontalMove;
+      object.yMeters = origin.yMeters + elevation.axis.yMeters * horizontalMove;
+      const height = bottom - deltaY;
+      object.elevationMeters = Math.max(0, Math.min(roomHeight(this.room) - original.heightMeters, this.snap ? Math.round(height * 20) / 20 : height));
     }
     this.renderGeometryOnly();
     return true;
@@ -822,6 +883,14 @@ export class FloorPlanEditor {
     const object = this.room.objects.find((candidate) => candidate.id === id);
     if (!object?.wallMount || !this.canEditSelection({ type: 'object', id })) return;
     this.beginAction();
+    const elevation = wallElevation(this.room, object.wallMount.wallId);
+    if (elevation) {
+      const point = pointOnWall(elevation, object.wallMount.offsetMeters);
+      object.xMeters = point.xMeters;
+      object.yMeters = point.yMeters;
+      object.rotationRadians = Math.atan2(elevation.axis.yMeters, elevation.axis.xMeters);
+    }
+    object.elevationMeters = object.wallMount.elevationMeters;
     delete object.wallMount;
     this.selection = null;
     this.commitAction();
@@ -1078,7 +1147,7 @@ export class FloorPlanEditor {
   }
 
   private summaryText(area: number, selected: Wall | null, issues: string[]): string {
-    if (this.view !== 'floor') return this.tool === 'object' ? 'Choose two corners on the wall.' : 'Select an object to move or resize it.';
+    if (this.view !== 'floor') return this.tool === 'object' ? 'Choose two corners on the wall.' : 'Wall elevation';
     if (selected) return `${formatLength(distanceBetween(selected.start, selected.end), this.units)} selected`;
     if (area > 0) {
       const issueText = issues.length ? ` · ${issues[0]}` : '';
@@ -1128,6 +1197,8 @@ export class FloorPlanEditor {
       if (!object || !this.canEditSelection({ type: 'object', id: object.id })) return;
       this.beginAction();
       object.wallMount = { wallId: this.view, offsetMeters: Math.max(0, (elevation.length - object.widthMeters) / 2), elevationMeters: Math.max(0, Math.min(0.3, roomHeight(this.room) - object.heightMeters)) };
+      delete object.elevationMeters;
+      delete object.rotationRadians;
       this.selection = { type: 'object', id: object.id };
       this.commitAction();
       this.onSelection(this.selection);
@@ -1167,21 +1238,19 @@ export class FloorPlanEditor {
         this.svg.append(rect);
       }
     }
-    for (const object of this.room.objects) {
-      if (!object.wallMount || !elevation.wallIds.includes(object.wallMount.wallId)) continue;
-      const objectElevation = wallElevation(this.room, object.wallMount.wallId);
-      if (!objectElevation) continue;
-      const point = pointOnWall(objectElevation, object.wallMount.offsetMeters);
-      const direction = objectElevation.axis.xMeters * elevation.axis.xMeters + objectElevation.axis.yMeters * elevation.axis.yMeters;
-      const offset = (point.xMeters - elevation.start.xMeters) * elevation.axis.xMeters + (point.yMeters - elevation.start.yMeters) * elevation.axis.yMeters - (direction < 0 ? object.widthMeters : 0);
-      const top = -object.wallMount.elevationMeters - object.heightMeters;
+    const projectedObjects = this.room.objects.flatMap((object) => {
+      const projection = this.projectObjectOnWall(object, elevation);
+      return projection ? [{ object, ...projection }] : [];
+    }).sort((first, second) => first.distance - second.distance);
+    let selectedHandle: SVGElement | null = null;
+    for (const { object, offset, width, top } of projectedObjects) {
       const editable = this.canEditSelection({ type: 'object', id: object.id });
       if (editable) {
         const hit = svgElement('rect', 'editor-elevation-hit');
         const minimum = Math.max(0.16, this.viewBox.width * 36 / Math.max(this.svg.clientWidth, 300));
-        const hitWidth = Math.max(object.widthMeters, minimum);
+        const hitWidth = Math.max(width, minimum);
         const hitHeight = Math.max(object.heightMeters, minimum);
-        hit.setAttribute('x', String(offset + (object.widthMeters - hitWidth) / 2));
+        hit.setAttribute('x', String(offset + (width - hitWidth) / 2));
         hit.setAttribute('y', String(top + (object.heightMeters - hitHeight) / 2));
         hit.setAttribute('width', String(hitWidth));
         hit.setAttribute('height', String(hitHeight));
@@ -1191,7 +1260,7 @@ export class FloorPlanEditor {
       const rect = svgElement('rect', 'editor-object editor-elevation-object');
       rect.setAttribute('x', String(offset));
       rect.setAttribute('y', String(top));
-      rect.setAttribute('width', String(object.widthMeters));
+      rect.setAttribute('width', String(width));
       rect.setAttribute('height', String(object.heightMeters));
       rect.dataset.objectId = object.id;
       if (!editable) rect.style.pointerEvents = 'none';
@@ -1201,13 +1270,44 @@ export class FloorPlanEditor {
       rect.append(title);
       this.svg.append(rect);
       if (editable && this.selection?.type === 'object' && this.selection.id === object.id) {
-        const handle = this.pointMarker({ xMeters: offset + object.widthMeters + 0.1, yMeters: top - 0.1 });
+        const handle = this.pointMarker({ xMeters: offset + width + 0.1, yMeters: top - 0.1 });
         handle.dataset.objectId = object.id;
         handle.dataset.resizeObject = 'true';
-        this.svg.append(handle);
+        selectedHandle = handle;
       }
     }
+    if (selectedHandle) this.svg.append(selectedHandle);
     if (this.objectStart) this.svg.append(this.pointMarker(this.objectStart));
+  }
+
+  private projectObjectOnWall(object: RoomObject, elevation: WallElevation): { offset: number; width: number; top: number; distance: number } | null {
+    const mountedElevation = object.wallMount ? wallElevation(this.room, object.wallMount.wallId) : null;
+    if (object.wallMount && mountedElevation && elevation.wallIds.includes(object.wallMount.wallId)) {
+      const point = pointOnWall(mountedElevation, object.wallMount.offsetMeters);
+      const direction = mountedElevation.axis.xMeters * elevation.axis.xMeters + mountedElevation.axis.yMeters * elevation.axis.yMeters;
+      return { offset: (point.xMeters - elevation.start.xMeters) * elevation.axis.xMeters + (point.yMeters - elevation.start.yMeters) * elevation.axis.yMeters - (direction < 0 ? object.widthMeters : 0), width: object.widthMeters, top: -object.wallMount.elevationMeters - object.heightMeters, distance: 0 };
+    }
+    if (!mountedElevation && (object.xMeters === undefined || object.yMeters === undefined)) return null;
+    const points = this.room.points.length ? this.room.points : this.room.walls.flatMap((wall) => [wall.start, wall.end]);
+    if (!points.length) return null;
+    const center = { xMeters: (Math.min(...points.map((point) => point.xMeters)) + Math.max(...points.map((point) => point.xMeters))) / 2, yMeters: (Math.min(...points.map((point) => point.yMeters)) + Math.max(...points.map((point) => point.yMeters))) / 2 };
+    const normal = { xMeters: -elevation.axis.yMeters, yMeters: elevation.axis.xMeters };
+    const centerDistance = (center.xMeters - elevation.start.xMeters) * normal.xMeters + (center.yMeters - elevation.start.yMeters) * normal.yMeters;
+    const sign = centerDistance < 0 ? -1 : 1;
+    const origin = mountedElevation && object.wallMount ? pointOnWall(mountedElevation, object.wallMount.offsetMeters) : { xMeters: object.xMeters ?? 0, yMeters: object.yMeters ?? 0 };
+    const axis = mountedElevation?.axis ?? { xMeters: Math.cos(object.rotationRadians ?? 0), yMeters: Math.sin(object.rotationRadians ?? 0) };
+    const corners = [[0, 0], [object.widthMeters, 0], [0, object.depthMeters], [object.widthMeters, object.depthMeters]].map(([along, depth]) => ({
+      xMeters: origin.xMeters + along * axis.xMeters - depth * axis.yMeters - elevation.start.xMeters,
+      yMeters: origin.yMeters + along * axis.yMeters + depth * axis.xMeters - elevation.start.yMeters,
+    }));
+    const offsets = corners.map((point) => point.xMeters * elevation.axis.xMeters + point.yMeters * elevation.axis.yMeters);
+    const distances = corners.map((point) => sign * (point.xMeters * normal.xMeters + point.yMeters * normal.yMeters));
+    const minDistance = Math.min(...distances);
+    const maxDistance = Math.max(...distances);
+    const offset = Math.max(0, Math.min(...offsets));
+    const end = Math.min(elevation.length, Math.max(...offsets));
+    if (end <= offset || maxDistance < 0 || minDistance > Math.abs(centerDistance)) return null;
+    return { offset, width: end - offset, top: -(object.wallMount?.elevationMeters ?? object.elevationMeters ?? 0) - object.heightMeters, distance: Math.max(0, minDistance) };
   }
 
   private renderGeometryOnly(): void {
@@ -1283,8 +1383,30 @@ export class FloorPlanEditor {
     rect.setAttribute('height', String(object.depthMeters));
     rect.dataset.objectId = object.id;
     const elevation = object.wallMount ? wallElevation(this.room, object.wallMount.wallId) : null;
-    if (elevation) rect.setAttribute('transform', `rotate(${Math.atan2(elevation.axis.yMeters, elevation.axis.xMeters) * 180 / Math.PI} ${object.xMeters} ${object.yMeters})`);
+    const angle = elevation ? Math.atan2(elevation.axis.yMeters, elevation.axis.xMeters) : object.rotationRadians ?? 0;
+    if (angle) rect.setAttribute('transform', `rotate(${angle * 180 / Math.PI} ${object.xMeters} ${object.yMeters})`);
     if (this.selection?.type === 'object' && this.selection.id === object.id) rect.classList.add('is-selected');
+    const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+    title.textContent = object.name;
+    rect.append(title);
+    if (Math.min(object.widthMeters, object.depthMeters) < 0.35) {
+      const marker = svgElement('line', 'editor-object-marker');
+      const centerX = String(object.xMeters + object.widthMeters / 2);
+      const centerY = String(object.yMeters + object.depthMeters / 2);
+      marker.setAttribute('x1', centerX);
+      marker.setAttribute('x2', centerX);
+      marker.setAttribute('y1', centerY);
+      marker.setAttribute('y2', centerY);
+      if (angle) marker.setAttribute('transform', rect.getAttribute('transform')!);
+      marker.dataset.objectId = object.id;
+      marker.append(title.cloneNode(true));
+      if (this.selection?.type === 'object' && this.selection.id === object.id) marker.classList.add('is-selected');
+      if (!this.canEditSelection({ type: 'object', id: object.id })) {
+        marker.style.pointerEvents = 'none';
+        rect.style.pointerEvents = 'none';
+      }
+      return [marker, rect];
+    }
     const width = svgElement('text', 'editor-dimension');
     width.setAttribute('x', String(object.xMeters + object.widthMeters / 2));
     width.setAttribute('y', String(object.yMeters - 0.12));
@@ -1414,10 +1536,15 @@ export class FloorPlanEditor {
       }
       this.view = 'floor';
     }
-    const objectCorners = this.room.objects.flatMap((object) => object.xMeters === undefined || object.yMeters === undefined ? [] : [
-      { xMeters: object.xMeters, yMeters: object.yMeters },
-      { xMeters: object.xMeters + object.widthMeters, yMeters: object.yMeters + object.depthMeters },
-    ]);
+    const objectCorners = this.room.objects.flatMap((object) => {
+      if (object.xMeters === undefined || object.yMeters === undefined) return [];
+      const elevation = object.wallMount ? wallElevation(this.room, object.wallMount.wallId) : null;
+      const angle = elevation ? Math.atan2(elevation.axis.yMeters, elevation.axis.xMeters) : object.rotationRadians ?? 0;
+      return [[0, 0], [object.widthMeters, 0], [0, object.depthMeters], [object.widthMeters, object.depthMeters]].map(([width, depth]) => ({
+        xMeters: object.xMeters! + width * Math.cos(angle) - depth * Math.sin(angle),
+        yMeters: object.yMeters! + width * Math.sin(angle) + depth * Math.cos(angle),
+      }));
+    });
     const points = [...this.room.points, ...this.room.walls.flatMap((wall) => [wall.start, wall.end]), ...objectCorners];
     if (!points.length) {
       this.viewBox = { x: -1, y: -1, width: 14, height: 11 };

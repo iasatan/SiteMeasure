@@ -52,6 +52,8 @@ export interface RoomObject {
   heightMeters: number;
   xMeters?: number;
   yMeters?: number;
+  elevationMeters?: number;
+  rotationRadians?: number;
   wallMount?: { wallId: string; offsetMeters: number; elevationMeters: number };
   /** 3D model copied from the object library when inserted. */
   parts?: ObjectPart[];

@@ -256,6 +256,8 @@
   .editor-wall.is-selected { stroke: var(--accent); stroke-width: 0.14; }
   .editor-object { fill: color-mix(in srgb, var(--accent) 12%, white); stroke: var(--green); stroke-width: 0.05; }
   .editor-object.is-selected { stroke: var(--accent); stroke-width: 0.1; }
+  .editor-object-marker { stroke: var(--green); stroke-width: 10px; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+  .editor-object-marker.is-selected { stroke: var(--accent); }
   .editor-elevation-wall { fill: var(--surface-raised); stroke: var(--green); stroke-width: 0.04; pointer-events: none; }
   .editor-elevation-opening { fill: #dce2da; stroke: var(--green); stroke-width: 0.03; pointer-events: none; }
   .editor-elevation-window { fill: #b7d9e3; }

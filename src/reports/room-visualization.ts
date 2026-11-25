@@ -264,7 +264,7 @@ function createRoomScene(room: Room): THREE.Scene {
     const elevation = mount ? wallElevation(room, mount.wallId) : null;
     const wall = mount ? room.walls.find((candidate) => candidate.id === mount.wallId) : undefined;
     const point = elevation && mount ? pointOnWall(elevation, mount.offsetMeters) : { xMeters: object.xMeters ?? offsetX, yMeters: object.yMeters ?? offsetZ };
-    const angle = elevation ? Math.atan2(elevation.axis.yMeters, elevation.axis.xMeters) : 0;
+    const angle = elevation ? Math.atan2(elevation.axis.yMeters, elevation.axis.xMeters) : object.rotationRadians ?? 0;
     let normalOffset = 0;
     if (elevation && wall) {
       const normalX = -elevation.axis.yMeters;
@@ -274,7 +274,7 @@ function createRoomScene(room: Room): THREE.Scene {
     }
     const x = point.xMeters - offsetX - Math.sin(angle) * normalOffset;
     const z = point.yMeters - offsetZ + Math.cos(angle) * normalOffset;
-    const bottom = mount?.elevationMeters ?? 0;
+    const bottom = mount?.elevationMeters ?? object.elevationMeters ?? 0;
     if (object.parts?.length) {
       const group = buildPartsGroup(object.parts, object);
       group.position.set(x, bottom, z);
@@ -283,8 +283,8 @@ function createRoomScene(room: Room): THREE.Scene {
       continue;
     }
     const material = new THREE.MeshStandardMaterial({ color: 0x5c8175, roughness: 0.62 });
-    const centerX = elevation ? x + Math.cos(angle) * object.widthMeters / 2 - Math.sin(angle) * object.depthMeters / 2 : x;
-    const centerZ = elevation ? z + Math.sin(angle) * object.widthMeters / 2 + Math.cos(angle) * object.depthMeters / 2 : z;
+    const centerX = x + Math.cos(angle) * object.widthMeters / 2 - Math.sin(angle) * object.depthMeters / 2;
+    const centerZ = z + Math.sin(angle) * object.widthMeters / 2 + Math.cos(angle) * object.depthMeters / 2;
     addBox(scene, object.widthMeters, object.heightMeters, object.depthMeters, centerX, bottom + object.heightMeters / 2, centerZ, material, -angle);
   }
 
