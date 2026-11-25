@@ -348,7 +348,8 @@
   .room-view-control select { min-height: 32px; border: 0; background: transparent; color: inherit; font: inherit; }
   .room-visualization-canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
   .room-visualization-canvas:active { cursor: grabbing; }
-  .room-visualization-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dialog-actions.room-visualization-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .room-visualization-actions .button:last-child { grid-column: 1 / -1; }
 
   .app-dialog {
     width: min(100% - 20px, 560px);

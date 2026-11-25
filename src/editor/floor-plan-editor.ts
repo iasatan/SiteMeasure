@@ -220,6 +220,20 @@ export class FloorPlanEditor {
   }
 
   rotateSelection(): void {
+    if (this.selection?.type === 'object') {
+      const object = this.room.objects.find((candidate) => candidate.id === this.selection?.id);
+      if (!object || object.wallMount || object.xMeters === undefined || object.yMeters === undefined || !this.canEditSelection(this.selection)) return;
+      const angle = object.rotationRadians ?? 0;
+      const nextAngle = angle + Math.PI / 2;
+      const halfWidth = object.widthMeters / 2;
+      const halfDepth = object.depthMeters / 2;
+      this.beginAction();
+      object.xMeters += (Math.cos(angle) - Math.cos(nextAngle)) * halfWidth - (Math.sin(angle) - Math.sin(nextAngle)) * halfDepth;
+      object.yMeters += (Math.sin(angle) - Math.sin(nextAngle)) * halfWidth + (Math.cos(angle) - Math.cos(nextAngle)) * halfDepth;
+      object.rotationRadians = nextAngle;
+      this.commitAction();
+      return;
+    }
     const wall = this.selectedWall();
     if (!wall) return;
     this.beginAction();

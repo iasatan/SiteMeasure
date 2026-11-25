@@ -27,6 +27,32 @@ function rectangleEditor(): EditorInternals {
 const loop = (editor: EditorInternals) => editor.room.walls.map((wall) => [wall.start.xMeters, wall.start.yMeters, wall.end.xMeters, wall.end.yMeters].map((value) => Math.round(value * 1000) / 1000));
 
 describe('floor plan editor', () => {
+  it('rotates a free-standing object around its center and supports undo and redo', () => {
+    const room = createRoom();
+    room.objects = [{ id: 'cabinet', name: 'Cabinet', widthMeters: 2, depthMeters: 1, heightMeters: 1, xMeters: 1, yMeters: 2 }];
+    const changes: ReturnType<typeof createRoom>[] = [];
+    const editor = new FloorPlanEditor({ room, layer: 'designer', units: 'metric', onChange: (changed) => changes.push(changed), onSelection: () => {} });
+    const internals = editor as unknown as EditorInternals;
+    internals.selection = { type: 'object', id: 'cabinet' };
+    editor.rotateSelection();
+    expect(editor.getRoom().objects[0]).toMatchObject({ xMeters: 2.5, yMeters: 1.5, rotationRadians: Math.PI / 2 });
+    expect(changes.at(-1)?.objects[0].rotationRadians).toBe(Math.PI / 2);
+    editor.undo();
+    expect(editor.getRoom().objects[0]).toMatchObject({ xMeters: 1, yMeters: 2 });
+    expect(editor.getRoom().objects[0].rotationRadians).toBeUndefined();
+    editor.redo();
+    expect(editor.getRoom().objects[0].rotationRadians).toBe(Math.PI / 2);
+  });
+
+  it('does not rotate wall-mounted objects', () => {
+    const room = createRoom();
+    room.objects = [{ id: 'socket', name: 'Socket', widthMeters: 1, depthMeters: 0.5, heightMeters: 1, xMeters: 1, yMeters: 2, wallMount: { wallId: 'wall', offsetMeters: 1, elevationMeters: 1 } }];
+    const editor = new FloorPlanEditor({ room, layer: 'designer', units: 'metric', onChange: () => {}, onSelection: () => {} });
+    (editor as unknown as EditorInternals).selection = { type: 'object', id: 'socket' };
+    editor.rotateSelection();
+    expect(editor.getRoom().objects[0]).toEqual(room.objects[0]);
+  });
+
   it('projects objects between the wall and the room center onto wall elevations', () => {
     const room = createRoom();
     room.points = [[0, 0], [4, 0], [4, 4], [0, 4]].map(([xMeters, yMeters]) => ({ xMeters, yMeters }));

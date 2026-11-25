@@ -1,10 +1,58 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { SiteMeasureApp } from '../src/app';
+import { LocalStorageProjectRepository } from '../src/data/local-storage-repository';
 import { createProject, createRoom } from '../src/domain/models';
+import { FloorPlanEditor } from '../src/editor/floor-plan-editor';
 import { csvCell, floorPlanSvg, measurementsCsv, printableReport } from '../src/reports/project-exports';
 import { roomViewerHtml } from '../src/reports/room-viewer-export';
-import { wallViewGeometry } from '../src/reports/room-visualization';
+import { createRoomPreview, wallViewGeometry } from '../src/reports/room-visualization';
+
+vi.mock('../src/reports/room-visualization', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../src/reports/room-visualization')>(),
+  createRoomPreview: vi.fn(),
+}));
 
 describe('project reports', () => {
+  it('opens and reloads the 3D view with current editor data', async () => {
+    const project = createProject('Current room');
+    const room = project.buildings[0].floors[0].rooms[0];
+    room.objects = [{ id: 'cabinet', name: 'Cabinet', widthMeters: 2, depthMeters: 1, heightMeters: 1, xMeters: 1, yMeters: 2 }];
+    new LocalStorageProjectRepository(localStorage).save(project);
+    const root = document.createElement('div');
+    document.body.append(root);
+    const app = new SiteMeasureApp(root) as unknown as {
+      layer: 'designer';
+      activeEditor: FloorPlanEditor;
+      openProject(id: string): void;
+      downloadText(text: string, filename: string, mimeType: string): void;
+    };
+    app.layer = 'designer';
+    app.openProject(project.id);
+    const dialog = root.querySelector<HTMLDialogElement>('dialog')!;
+    dialog.showModal = () => dialog.setAttribute('open', '');
+    dialog.close = () => { dialog.removeAttribute('open'); dialog.dispatchEvent(new Event('close')); };
+    const editor = app.activeEditor;
+    (editor as unknown as { handleSelectionPointer(point: { xMeters: number; yMeters: number }, target: SVGElement | null): void }).handleSelectionPointer({ xMeters: 2, yMeters: 2.5 }, root.querySelector<SVGElement>('.editor-object'));
+    [...root.querySelectorAll('button')].find((item) => item.textContent === 'Rotate 90°')!.click();
+    const dispose = vi.fn();
+    vi.mocked(createRoomPreview).mockReset().mockReturnValue({ dispose });
+    const download = vi.spyOn(app, 'downloadText').mockImplementation(() => {});
+    [...root.querySelectorAll('button')].find((item) => item.textContent === '3D view')!.click();
+    await vi.waitFor(() => expect(createRoomPreview).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(createRoomPreview).mock.calls[0][1].objects[0].rotationRadians).toBe(Math.PI / 2);
+    const updated = editor.getRoom();
+    updated.objects[0].name = 'Updated cabinet';
+    editor.setRoom(updated);
+    [...dialog.querySelectorAll('button')].find((item) => item.textContent === 'Reload 3D view')!.click();
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(createRoomPreview).mock.calls[1][1].objects[0].name).toBe('Updated cabinet');
+    [...dialog.querySelectorAll('button')].find((item) => item.textContent === 'Download 3D view')!.click();
+    expect(download.mock.calls[0][0]).toContain('Updated cabinet');
+    dialog.close();
+    expect(dispose).toHaveBeenCalledTimes(2);
+    root.remove();
+  });
+
   it('frames split wall segments from inside the room', () => {
     const room = createRoom();
     room.points = [{ xMeters: 0, yMeters: 0 }, { xMeters: 4, yMeters: 0 }, { xMeters: 4, yMeters: 3 }, { xMeters: 0, yMeters: 3 }];

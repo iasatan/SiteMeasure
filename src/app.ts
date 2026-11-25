@@ -274,7 +274,7 @@ export class SiteMeasureApp {
       topActions.append(button('Room', 'button quiet compact', () => this.addRoom(project)));
       topActions.append(button('Floor', 'button quiet compact', () => this.addFloor(project)));
     }
-    topActions.append(button('3D view', 'button primary compact', () => { void this.showRoomViewer(project, active); }));
+    topActions.append(button('3D view', 'button primary compact', () => { void this.showRoomViewer(project, this.activeEditor?.getRoom() ?? active); }));
     topActions.append(button('Export', 'button quiet compact', () => this.exportProject(project)));
     top.append(identity, topActions);
 
@@ -413,6 +413,7 @@ export class SiteMeasureApp {
         const dimensions = [object.widthMeters, object.depthMeters, object.heightMeters].map((value) => formatLength(value, project.preferredUnits)).join(' × ');
         readout.append(element('small', '', `${object.name} · W × D × H`), element('strong', '', dimensions));
         const actions = element('div', 'selection-actions');
+        if (!object.wallMount && object.xMeters !== undefined && object.yMeters !== undefined) actions.append(button('Rotate 90°', 'button quiet', () => this.activeEditor?.rotateSelection()));
         actions.append(button('Delete', 'button danger', () => this.activeEditor?.deleteSelection()));
         inspector.append(readout, button('Measure or set size', 'button primary stretch', () => this.showObjectDialog(project, room, object.id)), actions);
         if (object.wallMount) {
@@ -1561,14 +1562,30 @@ export class SiteMeasureApp {
       content.append(element('p', 'eyebrow', project.name), element('h2', 'dialog-title', `${room.name} in 3D`));
       const stage = element('div', 'room-visualization-stage');
       const actions = element('div', 'dialog-actions room-visualization-actions');
+      let currentRoom = room;
+      let preview: ReturnType<typeof createRoomPreview> | null = null;
+      const reload = () => {
+        const editorRoom = this.activeEditor?.getRoom();
+        const savedRoom = this.repository.get(project.id)?.buildings.flatMap((building) => building.floors.flatMap((floor) => floor.rooms)).find((candidate) => candidate.id === room.id);
+        currentRoom = editorRoom?.id === room.id ? editorRoom : savedRoom ?? currentRoom;
+        preview?.dispose();
+        preview = null;
+        stage.replaceChildren();
+        try {
+          preview = createRoomPreview(stage, currentRoom);
+        } catch (error) {
+          stage.append(element('p', 'validation-warning', error instanceof Error ? error.message : 'The 3D room could not be displayed.'));
+        }
+      };
       actions.append(button('Close', 'button quiet', () => dialog.close()));
+      actions.append(button('Reload 3D view', 'button quiet', reload));
       actions.append(button('Download 3D view', 'button primary', () => {
-        this.downloadText(roomViewerHtml(project.name, room), `${safeFilename(room.name)}-3d-view.html`, 'text/html');
+        this.downloadText(roomViewerHtml(project.name, currentRoom), `${safeFilename(currentRoom.name)}-3d-view.html`, 'text/html');
       }));
       content.append(stage, actions);
       dialog.replaceChildren(content);
-      const preview = createRoomPreview(stage, room);
-      dialog.addEventListener('close', () => preview.dispose(), { once: true });
+      reload();
+      dialog.addEventListener('close', () => preview?.dispose(), { once: true });
     } catch (error) {
       const content = element('div', 'dialog-content');
       content.append(element('p', 'eyebrow', '3D room'), element('h2', 'dialog-title', 'Could not render room'));
