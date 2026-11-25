@@ -3,7 +3,7 @@ import { ObjectLibrary } from './data/object-library';
 import { cloneParts, partBounds, type ObjectDefinition } from './domain/furniture';
 import { ObjectsPage } from './objects/objects-page';
 import { LocalStorageProjectRepository, type RepositoryWarning } from './data/local-storage-repository';
-import { createId, createProject, createRoom, DEFAULT_DOOR_HEIGHT_METERS, DEFAULT_WINDOW_HEIGHT_METERS, type PhotoAnnotation, type Project, type ProjectPhoto, type ProjectSummary, type Room } from './domain/models';
+import { createId, createProject, createRoom, DEFAULT_DOOR_HEIGHT_METERS, DEFAULT_WINDOW_HEIGHT_METERS, type EditingLayer, type PhotoAnnotation, type Project, type ProjectPhoto, type ProjectSummary, type Room } from './domain/models';
 import { FloorPlanEditor, type EditorSelection } from './editor/floor-plan-editor';
 import { deriveOpeningSegments, distanceBetween, formatLength, openingArea, polygonIssues, roomArea, roomHeight, roomVolume, wallArea, type OpeningSegmentKey } from './geometry';
 import { BoschLaserMeasureAdapter } from './bluetooth/bosch-laser-measure-adapter';
@@ -46,16 +46,19 @@ export class SiteMeasureApp {
   private explorerLog: string[] = [];
   private measurementPanelContext: { project: Project; room: Room; wall: Project['buildings'][number]['floors'][number]['rooms'][number]['walls'][number] } | null = null;
   private readonly objectsPage = new ObjectsPage(new ObjectLibrary(localStorage), {
+    layer: () => this.layer === 'technician' ? 'technician' : 'designer',
     projects: () => this.repository.list().map((summary) => ({ id: summary.id, name: summary.name })),
     rooms: (projectId) => {
       const project = this.repository.get(projectId);
       return project ? project.buildings.flatMap((building) => building.floors.flatMap((floor) => floor.rooms.map((room) => ({ id: room.id, name: `${building.name} / ${floor.name} / ${room.name}` })))) : [];
     },
     insert: (definition, projectId, roomId) => this.insertObject(definition, projectId, roomId),
+    openPlan: (projectId, roomId) => { this.activeRoomId = roomId; this.openProject(projectId); },
     download: (text, filename, mimeType) => this.downloadText(text, filename, mimeType),
     toast: (message) => this.showToast(message),
   });
   private view: PrimaryView = 'projects';
+  private layer: EditingLayer = 'builder';
   private selectedProjectId: string | null = null;
   private dirty = false;
   private saveState: SaveState = 'idle';
@@ -98,6 +101,7 @@ export class SiteMeasureApp {
             <span>SiteMeasure</span>
           </button>
           <span class="app-version">v${__APP_VERSION__}</span>
+          <label class="layer-picker"><span class="visually-hidden">Editing layer</span><select aria-label="Editing layer"><option value="builder">Builder</option><option value="technician">Technician</option><option value="designer">Designer</option></select></label>
           <div class="save-indicator" role="status" aria-live="polite"></div>
         </header>
         <div class="notice" role="status" aria-live="polite" hidden></div>
@@ -113,6 +117,12 @@ export class SiteMeasureApp {
 
     this.root.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((button) => {
       button.addEventListener('click', () => this.setView(button.dataset.view as PrimaryView));
+    });
+    this.root.querySelector<HTMLSelectElement>('.layer-picker select')?.addEventListener('change', (event) => {
+      this.layer = (event.currentTarget as HTMLSelectElement).value as EditingLayer;
+      if (this.layer === 'builder' && this.view === 'objects') this.view = this.selectedProjectId ? 'plan' : 'projects';
+      this.editorSelection = null;
+      this.render();
     });
     this.root.querySelector<HTMLInputElement>('[data-import-input]')?.addEventListener('change', (event) => {
       void this.handleImport((event.currentTarget as HTMLInputElement).files?.[0]);
@@ -130,6 +140,7 @@ export class SiteMeasureApp {
     if (!navigation) return;
     navigation.replaceChildren();
     for (const item of navItems) {
+      if (item.id === 'objects' && this.layer === 'builder') continue;
       const button = document.createElement('button');
       button.type = 'button';
       button.className = item.id === this.view ? 'nav-item is-active' : 'nav-item';
@@ -260,22 +271,26 @@ export class SiteMeasureApp {
     const identity = element('div');
     identity.append(element('p', 'eyebrow', project.projectNumber || 'Active project'), element('h1', '', project.name));
     const topActions = element('div', 'workspace-actions');
-    topActions.append(button('Room', 'button quiet compact', () => this.addRoom(project)));
-    topActions.append(button('Floor', 'button quiet compact', () => this.addFloor(project)));
+    if (this.layer === 'builder') {
+      topActions.append(button('Room', 'button quiet compact', () => this.addRoom(project)));
+      topActions.append(button('Floor', 'button quiet compact', () => this.addFloor(project)));
+    }
     topActions.append(button('3D view', 'button primary compact', () => { void this.showRoomViewer(project, active); }));
     topActions.append(button('Export', 'button quiet compact', () => this.exportProject(project)));
     top.append(identity, topActions);
 
     const canvas = element('div', 'plan-canvas');
     const hierarchy = element('div', 'plan-hierarchy');
-    hierarchy.append(this.roomSelector(project), button('Rename', 'button quiet compact', () => this.renameRoom(project, active)), button('Delete', 'button danger compact', () => this.confirmDeleteRoom(project, active)));
+    hierarchy.append(this.roomSelector(project));
+    if (this.layer === 'builder') hierarchy.append(button('Rename', 'button quiet compact', () => this.renameRoom(project, active)), button('Delete', 'button danger compact', () => this.confirmDeleteRoom(project, active)));
     this.activeEditor = new FloorPlanEditor({
       room: active,
       units: project.preferredUnits,
+      layer: this.layer,
       onChange: (room, completed) => this.updateRoom(project, room, completed),
       onSelection: (selection) => this.updateInspector(selection),
       onMeasure: (wall) => this.showMeasurementDialog(project, active, wall),
-      onMeasureObject: (id) => this.showObjectDialog(project, active, id),
+      onMeasureObject: (id) => { const room = this.activeRoom(project); if (room) this.showObjectDialog(project, room, id); },
       onOpening: (kind, id) => this.showOpeningDialog(project, kind, id),
     });
     canvas.append(hierarchy, this.activeEditor.element);
@@ -324,6 +339,7 @@ export class SiteMeasureApp {
     room.objects.push({
       id: createId(),
       name: definition.name,
+      layer: definition.layer ?? 'designer',
       widthMeters: bounds.widthMeters,
       depthMeters: bounds.depthMeters,
       heightMeters: bounds.heightMeters,
@@ -400,6 +416,10 @@ export class SiteMeasureApp {
         const actions = element('div', 'selection-actions');
         actions.append(button('Delete', 'button danger', () => this.activeEditor?.deleteSelection()));
         inspector.append(readout, button('Measure or set size', 'button primary stretch', () => this.showObjectDialog(project, room, object.id)), actions);
+        if (object.wallMount) {
+          inspector.append(this.wallMountFields(project, object.id, object.wallMount));
+          actions.append(button('Remove from wall', 'button quiet', () => this.activeEditor?.detachObjectFromWall(object.id)));
+        }
       }
     } else if (openingSelection) {
       const openingType = openingSelection.type;
@@ -422,11 +442,39 @@ export class SiteMeasureApp {
       metrics.append(calculation(`${roomArea(room).toFixed(2)} m²`, 'Area'));
       metrics.append(calculation(`${roomVolume(room).toFixed(2)} m³`, `Volume at ${roomHeight(room).toFixed(2)} m`));
       metrics.append(calculation(`${wallArea(room.walls, roomHeight(room), openingArea(room.walls, room)).toFixed(2)} m²`, 'Net wall area'));
-      inspector.append(metrics, this.roomHeightField(project, room), this.objectsSection(project, room));
+      inspector.append(metrics);
+      if (this.layer === 'builder') inspector.append(this.roomHeightField(project, room));
+      else inspector.append(this.objectsSection(project, room));
       if (issues.length) inspector.append(element('p', 'validation-warning', issues.join(' ')));
-      inspector.append(element('p', 'inspector-help', 'Choose Wall or Room, then tap or drag on the plan. Use two fingers to pan and pinch to zoom.'));
-      inspector.append(this.projectForm(project, 'autosave'));
+      if (this.layer === 'builder') inspector.append(element('p', 'inspector-help', 'Choose Wall or Room, then tap or drag on the plan. Use two fingers to pan and pinch to zoom.'));
+      if (this.layer === 'builder') inspector.append(this.projectForm(project, 'autosave'));
     }
+  }
+
+  private wallMountFields(project: Project, objectId: string, mount: NonNullable<Room['objects'][number]['wallMount']>): HTMLElement {
+    const imperial = project.preferredUnits === 'imperial';
+    const factor = imperial ? 3.280839895 : 1;
+    const section = element('div', 'wall-mount-fields');
+    const makeField = (label: string, value: number): HTMLInputElement => {
+      const wrapper = element('label', 'field');
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.inputMode = 'decimal';
+      input.value = (value * factor).toFixed(imperial ? 2 : 3);
+      input.addEventListener('input', () => input.setCustomValidity(''));
+      wrapper.append(element('span', 'field-label', `${label} (${imperial ? 'ft' : 'm'})`), input);
+      section.append(wrapper);
+      return input;
+    };
+    const offset = makeField('Distance along wall', mount.offsetMeters);
+    const height = makeField('Height above floor', mount.elevationMeters);
+    section.append(button('Set position', 'button quiet compact', () => {
+      if (!this.activeEditor?.updateWallMount(objectId, parseDecimalInput(offset.value) / factor, parseDecimalInput(height.value) / factor)) {
+        height.setCustomValidity('Position and object dimensions must fit on the wall.');
+        height.reportValidity();
+      }
+    }));
+    return section;
   }
 
   private cornerAngleField(): HTMLElement {
@@ -954,8 +1002,9 @@ export class SiteMeasureApp {
   private objectsSection(project: Project, room: Room): HTMLElement {
     const section = element('section', 'room-objects');
     section.append(element('h3', '', 'Objects'));
-    if (!room.objects.length) section.append(element('p', 'measurements-empty', 'No objects in this room yet.'));
-    for (const object of room.objects) {
+    const objects = room.objects.filter((object) => (object.layer ?? 'designer') === this.layer);
+    if (!objects.length) section.append(element('p', 'measurements-empty', 'No objects in this room yet.'));
+    for (const object of objects) {
       const row = element('div', 'room-note');
       const dimensions = [object.widthMeters, object.depthMeters, object.heightMeters].map((value) => formatLength(value, project.preferredUnits)).join(' × ');
       row.append(element('span', '', `${object.name} · ${dimensions}`));
@@ -973,7 +1022,7 @@ export class SiteMeasureApp {
 
   private showObjectDialog(project: Project, room: Room, objectId: string): void {
     const existing = room.objects.find((candidate) => candidate.id === objectId);
-    if (!existing) return;
+    if (!existing || (existing.layer ?? 'designer') !== this.layer) return;
     const imperial = project.preferredUnits === 'imperial';
     const factor = imperial ? 3.280839895 : 1;
     const dialog = this.dialog();
@@ -1006,7 +1055,10 @@ export class SiteMeasureApp {
         error.textContent = 'Enter a name and positive width, depth and height.';
         return;
       }
-      if (!this.activeEditor?.updateObject(objectId, { name: name.value.trim(), widthMeters, depthMeters, heightMeters })) return;
+      if (!this.activeEditor?.updateObject(objectId, { name: name.value.trim(), widthMeters, depthMeters, heightMeters })) {
+        error.textContent = 'The object must fit within its wall and room height.';
+        return;
+      }
       room.measurements.push({ id: createId(), targetType: 'other', targetId: objectId, valueMeters: widthMeters, capturedAt: new Date().toISOString(), source: 'manual' });
       project.modifiedAt = new Date().toISOString();
       if (this.save(project)) dialog.close();

@@ -4,6 +4,7 @@ import type { ObjectPart } from './furniture';
 export interface ObjectPreset {
   label: string;
   category: string;
+  layer?: 'technician' | 'designer';
   build: () => ObjectPart[];
 }
 
@@ -108,6 +109,10 @@ export const OBJECT_PRESETS: ObjectPreset[] = [
   { label: 'Table', category: 'Tables', build: () => make(table(1.4, 0.8, 0.76)) },
   { label: 'Bed', category: 'Bedroom', build: () => make(bed(1.6, 2)) },
   { label: 'Round stool', category: 'Seating', build: () => make([C(0, 0.225, 0, 0.4, 0.45, 0.4, WOOD)]) },
+  { label: 'Electrical wiring', category: 'Electrical', layer: 'technician', build: () => make([B(0, 0.02, 0, 1, 0.04, 0.04, RED)]) },
+  { label: 'Socket', category: 'Electrical', layer: 'technician', build: () => make([B(0, 0.3, 0, 0.09, 0.09, 0.03, WHITE), C(0, 0.3, 0.02, 0.025, 0.01, 0.025, DGREY)]) },
+  { label: 'Pipe', category: 'Plumbing', layer: 'technician', build: () => make([B(0, 0.03, 0, 1, 0.06, 0.06, METAL)]) },
+  { label: 'Faucet', category: 'Plumbing', layer: 'technician', build: () => make([C(0, 0.1, 0, 0.05, 0.2, 0.05, METAL), B(0, 0.19, 0.07, 0.05, 0.04, 0.16, METAL)]) },
 
   { label: 'Loveseat', category: 'Seating', build: () => make(sofa(1.4, BLUE, '#58707e')) },
   { label: 'Three-seat sofa', category: 'Seating', build: () => make(sofa(2.3, RED, '#7d3a34')) },

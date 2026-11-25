@@ -32,6 +32,19 @@ describe('object library', () => {
     const library = new ObjectLibrary(memoryStorage());
     expect(library.importAll(parsed)[0].id).not.toBe(couch.id);
   });
+
+  it('preserves technical object ownership in the library and object files', () => {
+    const socket = OBJECT_PRESETS.find((preset) => preset.label === 'Socket')!;
+    const definition = createObjectDefinition(socket.label, socket.build());
+    definition.layer = socket.layer;
+    const library = new ObjectLibrary(memoryStorage());
+    library.save(definition);
+    expect(library.list()[0].layer).toBe('technician');
+    expect(parseObjectFile(serializeObjects(library.list()))[0].layer).toBe('technician');
+    for (const label of ['Electrical wiring', 'Socket', 'Pipe', 'Faucet']) {
+      expect(OBJECT_PRESETS.find((preset) => preset.label === label)?.layer).toBe('technician');
+    }
+  });
 });
 
 describe('templates and attachments', () => {

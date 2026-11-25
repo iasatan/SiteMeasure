@@ -5,6 +5,7 @@ export const APPLICATION_VERSION = '0.1.0';
 
 export type Unit = 'metric' | 'imperial';
 export type ProjectStatus = 'active' | 'complete' | 'archived';
+export type EditingLayer = 'builder' | 'technician' | 'designer';
 
 export interface Point {
   xMeters: number;
@@ -45,11 +46,13 @@ export interface Window {
 export interface RoomObject {
   id: string;
   name: string;
+  layer?: 'technician' | 'designer';
   widthMeters: number;
   depthMeters: number;
   heightMeters: number;
   xMeters?: number;
   yMeters?: number;
+  wallMount?: { wallId: string; offsetMeters: number; elevationMeters: number };
   /** 3D model copied from the object library when inserted. */
   parts?: ObjectPart[];
 }

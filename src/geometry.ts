@@ -6,6 +6,45 @@ export function distanceBetween(left: Point, right: Point): number {
   return Math.hypot(right.xMeters - left.xMeters, right.yMeters - left.yMeters);
 }
 
+export interface WallElevation {
+  wallIds: string[];
+  start: Point;
+  axis: Point;
+  length: number;
+}
+
+export function wallElevation(room: Room, wallId: string): WallElevation | null {
+  const wall = room.walls.find((candidate) => candidate.id === wallId);
+  if (!wall) return null;
+  const length = distanceBetween(wall.start, wall.end);
+  if (length < 0.001) return null;
+  const axis = { xMeters: (wall.end.xMeters - wall.start.xMeters) / length, yMeters: (wall.end.yMeters - wall.start.yMeters) / length };
+  const collinear = room.walls.filter((candidate) => [candidate.start, candidate.end].every((point) => Math.abs((point.xMeters - wall.start.xMeters) * axis.yMeters - (point.yMeters - wall.start.yMeters) * axis.xMeters) < 0.001));
+  const connected = new Set([wall.id]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const candidate of collinear) {
+      if (connected.has(candidate.id)) continue;
+      const touches = collinear.some((other) => connected.has(other.id) && [candidate.start, candidate.end].some((point) => [other.start, other.end].some((endpoint) => distanceBetween(point, endpoint) < 0.001)));
+      const linked = [...room.doors, ...room.windows].some((opening) => opening.rightWallId && ((opening.wallId === candidate.id && connected.has(opening.rightWallId)) || (opening.rightWallId === candidate.id && connected.has(opening.wallId))));
+      if (touches || linked) {
+        connected.add(candidate.id);
+        changed = true;
+      }
+    }
+  }
+  const matching = collinear.filter((candidate) => connected.has(candidate.id));
+  const positions = matching.flatMap((candidate) => [candidate.start, candidate.end].map((point) => (point.xMeters - wall.start.xMeters) * axis.xMeters + (point.yMeters - wall.start.yMeters) * axis.yMeters));
+  const min = Math.min(...positions);
+  const max = Math.max(...positions);
+  return { wallIds: matching.map((candidate) => candidate.id), start: { xMeters: wall.start.xMeters + axis.xMeters * min, yMeters: wall.start.yMeters + axis.yMeters * min }, axis, length: max - min };
+}
+
+export function pointOnWall(elevation: WallElevation, offsetMeters: number): Point {
+  return { xMeters: elevation.start.xMeters + elevation.axis.xMeters * offsetMeters, yMeters: elevation.start.yMeters + elevation.axis.yMeters * offsetMeters };
+}
+
 export function polygonArea(points: Point[]): number {
   if (points.length < 3) return 0;
   const doubled = points.reduce((sum, point, index) => {

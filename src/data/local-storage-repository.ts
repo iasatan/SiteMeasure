@@ -220,6 +220,9 @@ function remapRoomIds(room: Project['buildings'][number]['floors'][number]['room
     window.wallId = mappedId(idMap, window.wallId);
     if (window.rightWallId) window.rightWallId = mappedId(idMap, window.rightWallId);
   });
+  room.objects.forEach((object) => {
+    if (object.wallMount) object.wallMount.wallId = mappedId(idMap, object.wallMount.wallId);
+  });
   room.measurements.forEach((measurement) => {
     measurement.id = mappedId(idMap, measurement.id);
     measurement.targetId = mappedId(idMap, measurement.targetId);

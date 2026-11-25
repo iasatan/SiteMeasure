@@ -19,10 +19,12 @@ import { createId } from '../domain/models';
 import { createObjectPreview, type ObjectPreview } from './object-preview';
 
 export interface ObjectsPageHost {
+  layer(): 'technician' | 'designer';
   /** Projects ordered most recently modified first. */
   projects(): Array<{ id: string; name: string }>;
   rooms(projectId: string): Array<{ id: string; name: string }>;
   insert(definition: ObjectDefinition, projectId: string, roomId: string): void;
+  openPlan(projectId: string, roomId: string): void;
   download(text: string, filename: string, mimeType: string): void;
   toast(message: string): void;
 }
@@ -54,6 +56,11 @@ export class ObjectsPage {
 
   render(main: HTMLElement): void {
     this.container = main;
+    if ((this.draft.layer ?? 'designer') !== this.host.layer()) {
+      this.draft = createObjectDefinition('New object', [createPart()]);
+      this.draft.layer = this.host.layer();
+      this.selectedPartId = this.draft.parts[0].id;
+    }
     const page = el('section', 'page objects-page');
     const heading = el('div', 'page-heading');
     const title = el('div');
@@ -79,6 +86,7 @@ export class ObjectsPage {
 
   private startNew(): void {
     this.draft = createObjectDefinition('New object', [createPart()]);
+    this.draft.layer = this.host.layer();
     this.selectedPartId = this.draft.parts[0].id;
     this.message = '';
     this.rerender();
@@ -87,7 +95,7 @@ export class ObjectsPage {
   private libraryList(): HTMLElement {
     const section = el('section', 'settings-section');
     section.append(el('h2', '', 'Saved objects'));
-    const objects = this.library.list();
+    const objects = this.library.list().filter((object) => (object.layer ?? 'designer') === this.host.layer());
     if (!objects.length) section.append(el('p', '', 'No saved objects yet. Build one below and save it by name.'));
     const projects = this.host.projects();
     if (!projects.some((project) => project.id === this.targetProjectId)) {
@@ -107,6 +115,23 @@ export class ObjectsPage {
       );
       section.append(picker);
     }
+    const templates = el('div', 'insert-target');
+    const templateSelect = document.createElement('select');
+    templateSelect.className = 'room-selector';
+    templateSelect.setAttribute('aria-label', 'Object template');
+    const available = OBJECT_PRESETS.filter((preset) => (preset.layer ?? 'designer') === this.host.layer());
+    available.forEach((preset, index) => templateSelect.append(new Option(preset.label, String(index))));
+    const insertTemplate = btn('Insert template', 'button primary compact', () => {
+      const preset = available[Number(templateSelect.value)];
+      if (!preset || !projectId || !roomId) return;
+      const definition = createObjectDefinition(preset.label, preset.build());
+      definition.layer = this.host.layer();
+      this.host.insert(definition, projectId, roomId);
+    });
+    insertTemplate.disabled = !target;
+    templates.append(templateSelect, insertTemplate);
+    section.append(templates);
+    if (projectId && roomId) section.append(btn('Open plan', 'button quiet compact', () => this.host.openPlan(projectId, roomId)));
     for (const object of objects) {
       const row = el('div', 'room-note object-row');
       const bounds = partBounds(object.parts);
@@ -168,6 +193,7 @@ export class ObjectsPage {
     preset.append(new Option('Start from a template…', ''));
     const groups = new Map<string, HTMLOptGroupElement>();
     OBJECT_PRESETS.forEach((item, index) => {
+      if ((item.layer ?? 'designer') !== this.host.layer()) return;
       let group = groups.get(item.category);
       if (!group) {
         group = document.createElement('optgroup');

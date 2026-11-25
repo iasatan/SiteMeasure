@@ -133,8 +133,15 @@ function validateRoom(value: unknown, path: string): void {
     const object = expectRecord(objectValue, `${path}.objects[${index}]`);
     expectString(object.id, `${path}.objects[${index}].id`, false);
     expectString(object.name, `${path}.objects[${index}].name`, false);
+    if (object.layer !== undefined && object.layer !== 'technician' && object.layer !== 'designer') throw new ProjectValidationError(`${path}.objects[${index}].layer is invalid.`);
     for (const key of ['widthMeters', 'depthMeters', 'heightMeters']) expectFinite(object[key], `${path}.objects[${index}].${key}`, 0.001, 1000);
     for (const key of ['xMeters', 'yMeters']) if (object[key] !== undefined) expectFinite(object[key], `${path}.objects[${index}].${key}`, -100000, 100000);
+    if (object.wallMount !== undefined) {
+      const mount = expectRecord(object.wallMount, `${path}.objects[${index}].wallMount`);
+      expectString(mount.wallId, `${path}.objects[${index}].wallMount.wallId`, false);
+      expectFinite(mount.offsetMeters, `${path}.objects[${index}].wallMount.offsetMeters`, 0, 100000);
+      expectFinite(mount.elevationMeters, `${path}.objects[${index}].wallMount.elevationMeters`, 0, 100000);
+    }
     if (object.parts !== undefined) {
       try {
         validateParts(object.parts, `${path}.objects[${index}].parts`);

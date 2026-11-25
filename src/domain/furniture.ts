@@ -20,6 +20,7 @@ export interface ObjectPart {
 export interface ObjectDefinition {
   id: string;
   name: string;
+  layer?: 'technician' | 'designer';
   parts: ObjectPart[];
   createdAt: string;
   modifiedAt: string;
@@ -204,11 +205,13 @@ export function validateObjectDefinition(value: unknown): ObjectDefinition {
   const record = value as Record<string, unknown>;
   if (typeof record.id !== 'string' || !record.id.trim() || record.id.length > 200) throw new ObjectValidationError('Object id is invalid.');
   if (typeof record.name !== 'string' || !record.name.trim() || record.name.length > 200) throw new ObjectValidationError('Object name is invalid.');
+  if (record.layer !== undefined && record.layer !== 'technician' && record.layer !== 'designer') throw new ObjectValidationError('Object layer is invalid.');
   const now = new Date().toISOString();
   const validDate = (date: unknown): string => (typeof date === 'string' && !Number.isNaN(Date.parse(date)) ? date : now);
   return {
     id: record.id,
     name: record.name.trim(),
+    ...(record.layer ? { layer: record.layer as 'technician' | 'designer' } : {}),
     parts: validateParts(record.parts),
     createdAt: validDate(record.createdAt),
     modifiedAt: validDate(record.modifiedAt),

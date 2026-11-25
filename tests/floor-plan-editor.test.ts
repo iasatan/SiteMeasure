@@ -26,6 +26,124 @@ function rectangleEditor(): EditorInternals {
 const loop = (editor: EditorInternals) => editor.room.walls.map((wall) => [wall.start.xMeters, wall.start.yMeters, wall.end.xMeters, wall.end.yMeters].map((value) => Math.round(value * 1000) / 1000));
 
 describe('floor plan editor', () => {
+  it('places, moves, resizes and restores an object on a wall', () => {
+    const room = createRoom();
+    room.walls = [{ id: 'wall', start: { xMeters: 1, yMeters: 2 }, end: { xMeters: 1, yMeters: 6 }, thicknessMeters: 0.15 }];
+    room.objects = [{ id: 'socket', name: 'Socket', layer: 'technician', widthMeters: 0.1, depthMeters: 0.05, heightMeters: 0.1, xMeters: 2, yMeters: 3 }];
+    const editor = new FloorPlanEditor({ room, layer: 'technician', units: 'metric', onChange: () => {}, onSelection: () => {} });
+    const select = editor.element.querySelector<HTMLSelectElement>('[aria-label="Editor view"]')!;
+    select.value = 'wall';
+    select.dispatchEvent(new Event('change'));
+    const picker = editor.element.querySelector<HTMLSelectElement>('[aria-label="Object to place on wall"]')!;
+    picker.value = 'socket';
+    editor.element.querySelector<HTMLButtonElement>('[aria-label="Place object on wall"]')!.click();
+    expect(editor.getRoom().objects[0].wallMount).toEqual({ wallId: 'wall', offsetMeters: 1.95, elevationMeters: 0.3 });
+    expect(editor.updateWallMount('socket', 1, 1.2)).toBe(true);
+    expect(editor.getRoom().objects[0]).toMatchObject({ xMeters: 1, yMeters: 3, wallMount: { offsetMeters: 1, elevationMeters: 1.2 } });
+    expect(editor.updateWallMount('socket', 4, 1)).toBe(false);
+    expect(editor.updateObject('socket', { widthMeters: 5 })).toBe(false);
+
+    const internals = editor as unknown as EditorInternals & { handleObjectDrag(point: { xMeters: number; yMeters: number }): void; pointerUp(event: { pointerId: number }): void };
+    const target = editor.element.querySelector<SVGElement>('[data-object-id="socket"]')!;
+    internals.handleSelectionPointer({ xMeters: 1, yMeters: -1.2 }, target);
+    internals.handleObjectDrag({ xMeters: 2, yMeters: -1.7 });
+    internals.pointerUp({ pointerId: 1 });
+    expect(editor.getRoom().objects[0].wallMount).toEqual({ wallId: 'wall', offsetMeters: 2, elevationMeters: 1.7 });
+    const handle = editor.element.querySelector<SVGElement>('[data-resize-object="true"]')!;
+    internals.handleSelectionPointer({ xMeters: 2.1, yMeters: -1.8 }, handle);
+    internals.handleObjectDrag({ xMeters: 2.6, yMeters: -2.2 });
+    internals.pointerUp({ pointerId: 1 });
+    expect(editor.getRoom().objects[0].widthMeters).toBeCloseTo(0.6);
+    expect(editor.getRoom().objects[0].heightMeters).toBeCloseTo(0.5);
+    editor.undo();
+    expect(editor.getRoom().objects[0].widthMeters).toBeCloseTo(0.1);
+    editor.redo();
+    const restored = new FloorPlanEditor({ room: editor.getRoom(), layer: 'technician', units: 'metric', onChange: () => {}, onSelection: () => {} });
+    const restoredView = restored.element.querySelector<HTMLSelectElement>('[aria-label="Editor view"]')!;
+    restoredView.value = 'wall';
+    restoredView.dispatchEvent(new Event('change'));
+    expect(restored.element.querySelector('[data-object-id="socket"]')).not.toBeNull();
+    expect(restored.getRoom().objects[0].heightMeters).toBeCloseTo(0.5);
+    const designer = new FloorPlanEditor({ room: editor.getRoom(), layer: 'designer', units: 'metric', onChange: () => {}, onSelection: () => {} });
+    const designerView = designer.element.querySelector<HTMLSelectElement>('[aria-label="Editor view"]')!;
+    designerView.value = 'wall';
+    designerView.dispatchEvent(new Event('change'));
+    const socket = designer.element.querySelector<SVGElement>('.editor-elevation-object')!;
+    expect(socket.style.pointerEvents).toBe('none');
+    expect(designer.updateWallMount('socket', 0, 0)).toBe(false);
+  });
+
+  it('draws a wall-mounted object in elevation coordinates', () => {
+    const room = createRoom();
+    room.walls = [{ id: 'wall', start: { xMeters: 0, yMeters: 0 }, end: { xMeters: 4, yMeters: 0 }, thicknessMeters: 0.15 }];
+    const editor = new FloorPlanEditor({ room, layer: 'technician', units: 'metric', onChange: () => {}, onSelection: () => {} });
+    const select = editor.element.querySelector<HTMLSelectElement>('[aria-label="Editor view"]')!;
+    select.value = 'wall';
+    select.dispatchEvent(new Event('change'));
+    editor.setTool('object');
+    const internals = editor as unknown as { addObjectPoint(point: { xMeters: number; yMeters: number }): void };
+    internals.addObjectPoint({ xMeters: -1, yMeters: -2 });
+    internals.addObjectPoint({ xMeters: 1, yMeters: -2 });
+    internals.addObjectPoint({ xMeters: 2, yMeters: -1 });
+    expect(editor.getRoom().objects[0]).toMatchObject({ layer: 'technician', widthMeters: 1, heightMeters: 1, depthMeters: 0.05, xMeters: 1, yMeters: 0, wallMount: { wallId: 'wall', offsetMeters: 1, elevationMeters: 1 } });
+  });
+
+  it('moves objects correctly on a reversed connected wall segment', () => {
+    const room = createRoom();
+    room.walls = [
+      { id: 'first', start: { xMeters: 0, yMeters: 0 }, end: { xMeters: 2, yMeters: 0 }, thicknessMeters: 0.15 },
+      { id: 'reverse', start: { xMeters: 4, yMeters: 0 }, end: { xMeters: 2, yMeters: 0 }, thicknessMeters: 0.15 },
+    ];
+    room.windows = [{ id: 'window', wallId: 'reverse', offsetMeters: 0.5, widthMeters: 0.5 }];
+    room.objects = [{ id: 'socket', name: 'Socket', layer: 'technician', widthMeters: 0.2, depthMeters: 0.1, heightMeters: 0.2, xMeters: 3, yMeters: 0, wallMount: { wallId: 'reverse', offsetMeters: 1, elevationMeters: 1 } }];
+    const editor = new FloorPlanEditor({ room, layer: 'technician', units: 'metric', onChange: () => {}, onSelection: () => {} });
+    const select = editor.element.querySelector<HTMLSelectElement>('[aria-label="Editor view"]')!;
+    select.value = 'first';
+    select.dispatchEvent(new Event('change'));
+    expect(editor.element.querySelector('.editor-elevation-window')?.getAttribute('x')).toBe('3');
+    const internals = editor as unknown as EditorInternals & { handleObjectDrag(point: { xMeters: number; yMeters: number }): void; pointerUp(event: { pointerId: number }): void };
+    internals.handleSelectionPointer({ xMeters: 2.8, yMeters: -1 }, editor.element.querySelector<SVGElement>('.editor-elevation-object')!);
+    internals.handleObjectDrag({ xMeters: 3.3, yMeters: -1 });
+    internals.pointerUp({ pointerId: 1 });
+    expect(editor.getRoom().objects[0].wallMount?.offsetMeters).toBeCloseTo(0.5);
+    internals.handleSelectionPointer({ xMeters: 3.5, yMeters: -1.2 }, editor.element.querySelector<SVGElement>('[data-resize-object="true"]')!);
+    internals.handleObjectDrag({ xMeters: 3.7, yMeters: -1.2 });
+    internals.pointerUp({ pointerId: 1 });
+    expect(editor.getRoom().objects[0].widthMeters).toBeCloseTo(0.4);
+    expect(editor.getRoom().objects[0].wallMount?.offsetMeters).toBeCloseTo(0.3);
+  });
+
+  it('only selects and edits elements belonging to the active layer', () => {
+    const room = createRoom();
+    room.walls = [{ id: 'wall', start: { xMeters: 0, yMeters: 0 }, end: { xMeters: 4, yMeters: 0 }, thicknessMeters: 0.15 }];
+    room.doors = [{ id: 'door', wallId: 'wall', offsetMeters: 1, widthMeters: 0.9 }];
+    room.objects = [
+      { id: 'socket', name: 'Socket', layer: 'technician', widthMeters: 0.1, depthMeters: 0.1, heightMeters: 0.1, xMeters: 1, yMeters: 1 },
+      { id: 'chair', name: 'Chair', widthMeters: 1, depthMeters: 1, heightMeters: 1, xMeters: 2, yMeters: 2 },
+    ];
+    for (const [layer, allowed, denied] of [
+      ['builder', ['wall', 'door'], ['socket', 'chair']],
+      ['technician', ['socket'], ['wall', 'door', 'chair']],
+      ['designer', ['chair'], ['wall', 'door', 'socket']],
+    ] as const) {
+      const callbacks: string[] = [];
+      const editor = new FloorPlanEditor({ room, layer, units: 'metric', onChange: () => {}, onSelection: () => {}, onMeasure: () => callbacks.push('wall'), onMeasureObject: (id) => callbacks.push(id), onOpening: () => callbacks.push('door') });
+      const internals = editor as unknown as EditorInternals;
+      for (const id of [...allowed, ...denied]) {
+        const selector = `[data-wall-id="${id}"], [data-opening-id="${id}"], [data-object-id="${id}"]`;
+        const target = editor.element.querySelector<SVGElement>(selector)!;
+        internals.selection = null;
+        internals.handleSelectionPointer({ xMeters: 1, yMeters: 1 }, target);
+        const selected = internals.selection as EditorInternals['selection'];
+        expect(selected?.id ?? null, `${layer}: ${id}`).toBe(allowed.includes(id as never) ? id : null);
+        editor.element.querySelector<SVGElement>(selector)!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+      }
+      expect(callbacks.sort()).toEqual([...allowed].sort());
+      expect(editor.updateObject('socket', { name: 'Changed' })).toBe(layer === 'technician');
+      expect(editor.element.querySelector('[title="Wall tool"]') !== null).toBe(layer === 'builder');
+    }
+  });
+
   it('shrinks a rectangle when the top then bottom wall length changes', () => {
     const editor = rectangleEditor();
     editor.selection = { type: 'wall', id: 'w0' };

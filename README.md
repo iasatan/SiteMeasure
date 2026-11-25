@@ -28,6 +28,16 @@ Projects are stored only in browser `localStorage`. SiteMeasure does not transmi
 
 Current export format: `*.sitemeasure.json`.
 
+## Editing layers
+
+Choose Builder, Technician, or Designer in the header. Builder edits rooms, walls, doors, and windows. Technician places electrical wiring, sockets, pipes, and faucets from Objects. Designer places furniture from Objects. Other layers remain visible on the plan but cannot be selected or edited in the active layer. Existing objects without a layer belong to Designer. Use Open plan in Objects to return to the selected room after inserting a template.
+
+Layers are local editing modes, not user accounts or security permissions; anyone with access to the project can switch modes. Wiring and pipes are individual resizable object segments, not connected system models.
+
+In the 3D room view, use the View selector to switch between the orbiting 3D view, the floor, and individual wall elevations. The same views are available in downloaded 3D room files.
+
+In the plan editor, select a wall in the Editor view control to edit its elevation. Technicians can place an existing object on that wall, draw an object directly, drag it, or resize it using its handle. The inspector also accepts exact distance-along-wall and height-above-floor values. Wall attachments are saved with the project and appear at their mounted height in 3D.
+
 ## Current scope
 
 Phases 1 through 4 include:

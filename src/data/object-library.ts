@@ -30,7 +30,7 @@ export class ObjectLibrary {
   save(definition: ObjectDefinition): ObjectDefinition {
     const checked = validateObjectDefinition(definition);
     checked.modifiedAt = new Date().toISOString();
-    const others = this.list().filter((item) => item.id !== checked.id && item.name.toLowerCase() !== checked.name.toLowerCase());
+    const others = this.list().filter((item) => item.id !== checked.id && (item.name.toLowerCase() !== checked.name.toLowerCase() || (item.layer ?? 'designer') !== (checked.layer ?? 'designer')));
     this.write([...others, checked]);
     return checked;
   }
@@ -47,8 +47,8 @@ export class ObjectLibrary {
       copy.parts = cloneParts(copy.parts);
       return copy;
     });
-    const names = new Set(imported.map((item) => item.name.toLowerCase()));
-    this.write([...this.list().filter((item) => !names.has(item.name.toLowerCase())), ...imported]);
+    const names = new Set(imported.map((item) => `${item.layer ?? 'designer'}:${item.name.toLowerCase()}`));
+    this.write([...this.list().filter((item) => !names.has(`${item.layer ?? 'designer'}:${item.name.toLowerCase()}`)), ...imported]);
     return imported;
   }
 
