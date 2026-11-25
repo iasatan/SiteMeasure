@@ -13,6 +13,7 @@ interface EditorInternals {
   deleteSelection(): void;
   handleWallDrag(point: { xMeters: number; yMeters: number }): void;
   handleSelectionPointer(point: { xMeters: number; yMeters: number }, target: SVGElement | null): void;
+  nearestSelectionTarget(point: { xMeters: number; yMeters: number }, target: SVGElement | null): SVGElement | null;
 }
 
 function rectangleEditor(): EditorInternals {
@@ -26,6 +27,53 @@ function rectangleEditor(): EditorInternals {
 const loop = (editor: EditorInternals) => editor.room.walls.map((wall) => [wall.start.xMeters, wall.start.yMeters, wall.end.xMeters, wall.end.yMeters].map((value) => Math.round(value * 1000) / 1000));
 
 describe('floor plan editor', () => {
+  it('picks the nearest editable geometry within a screen-sized tolerance', () => {
+    const room = createRoom();
+    room.walls = [
+      { id: 'upper', start: { xMeters: 0, yMeters: 0 }, end: { xMeters: 4, yMeters: 0 }, thicknessMeters: 0.15 },
+      { id: 'lower', start: { xMeters: 0, yMeters: 0.3 }, end: { xMeters: 4, yMeters: 0.3 }, thicknessMeters: 0.15 },
+    ];
+    room.objects = [{ id: 'chair', name: 'Chair', widthMeters: 0.2, depthMeters: 0.2, heightMeters: 1, xMeters: 2, yMeters: 1 }];
+    const editor = new FloorPlanEditor({ room, units: 'metric', onChange: () => {}, onSelection: () => {} });
+    const internals = editor as unknown as EditorInternals;
+    const upperHit = editor.element.querySelector<SVGElement>('.editor-wall-hit[data-wall-id="upper"]')!;
+    expect(internals.nearestSelectionTarget({ xMeters: 1, yMeters: 0.25 }, upperHit)?.dataset.wallId).toBe('lower');
+    expect(internals.nearestSelectionTarget({ xMeters: 2.25, yMeters: 1.1 }, null)?.dataset.objectId).toBe('chair');
+    expect(internals.nearestSelectionTarget({ xMeters: 10, yMeters: 10 }, null)).toBeNull();
+
+    const designer = new FloorPlanEditor({ room, layer: 'designer', units: 'metric', onChange: () => {}, onSelection: () => {} }) as unknown as EditorInternals;
+    expect(designer.nearestSelectionTarget({ xMeters: 1, yMeters: 0.01 }, null)).toBeNull();
+  });
+
+  it('picks openings, rotated objects, and elevation objects without stealing handles', () => {
+    const room = createRoom();
+    room.walls = [{ id: 'wall', start: { xMeters: 0, yMeters: 0 }, end: { xMeters: 0, yMeters: 4 }, thicknessMeters: 0.15 }];
+    room.doors = [{ id: 'door', wallId: 'wall', offsetMeters: 1, widthMeters: 0.9 }];
+    room.objects = [{ id: 'socket', name: 'Socket', layer: 'technician', widthMeters: 0.3, depthMeters: 0.1, heightMeters: 0.2, xMeters: 0, yMeters: 2, wallMount: { wallId: 'wall', offsetMeters: 2, elevationMeters: 1 } }];
+    const editor = new FloorPlanEditor({ room, units: 'metric', onChange: () => {}, onSelection: () => {} });
+    const internals = editor as unknown as EditorInternals;
+    expect(internals.nearestSelectionTarget({ xMeters: 0.05, yMeters: 1.5 }, null)?.dataset.openingId).toBe('door');
+    expect(internals.nearestSelectionTarget({ xMeters: -0.05, yMeters: 2.2 }, null)?.dataset.objectId).toBe('socket');
+    internals.handleSelectionPointer({ xMeters: 0, yMeters: 0 }, editor.element.querySelector<SVGElement>('.editor-wall[data-wall-id="wall"]')!);
+    const handle = editor.element.querySelector<SVGElement>('[data-endpoint="start"]')!;
+    expect(internals.nearestSelectionTarget({ xMeters: 0, yMeters: 0 }, handle)).toBe(handle);
+
+    const view = editor.element.querySelector<HTMLSelectElement>('[aria-label="Editor view"]')!;
+    view.value = 'wall';
+    view.dispatchEvent(new Event('change'));
+    expect(internals.nearestSelectionTarget({ xMeters: 2.35, yMeters: -1.1 }, null)?.dataset.objectId).toBe('socket');
+  });
+
+  it('selects and starts dragging the closest wall from a pointer event', () => {
+    const editor = rectangleEditor();
+    const internals = editor as EditorInternals & { pointerWorld(): { xMeters: number; yMeters: number }; pointerDown(event: Partial<PointerEvent>): void };
+    internals.pointerWorld = () => ({ xMeters: 2, yMeters: 0.1 });
+    const svg = editor.element.querySelector('svg')!;
+    internals.pointerDown({ pointerId: 1, clientX: 0, clientY: 0, target: svg, preventDefault: () => {} });
+    expect(editor.selection).toEqual({ type: 'wall', id: 'w0' });
+    expect(editor.dragOrigin).toEqual({ xMeters: 2, yMeters: 0.1 });
+  });
+
   it('places, moves, resizes and restores an object on a wall', () => {
     const room = createRoom();
     room.walls = [{ id: 'wall', start: { xMeters: 1, yMeters: 2 }, end: { xMeters: 1, yMeters: 6 }, thicknessMeters: 0.15 }];

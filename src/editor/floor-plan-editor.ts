@@ -393,7 +393,7 @@ export class FloorPlanEditor {
       event.preventDefault();
       if (performance.now() - this.lastHandledDoubleClickAt < 500) return;
       const target = (event.target as Element).closest<SVGElement>('[data-wall-id], [data-opening-id], [data-object-id], [data-room-id]');
-      this.handleDoubleClick(target, this.doubleClickSelection);
+      this.handleDoubleClick(this.doubleClickSelection ? null : target, this.doubleClickSelection);
     });
   }
 
@@ -440,7 +440,8 @@ export class FloorPlanEditor {
       return;
     }
 
-    const target = (event.target as Element).closest<SVGElement>('[data-wall-id], [data-opening-id], [data-object-id], [data-room-id]');
+    let target = (event.target as Element).closest<SVGElement>('[data-wall-id], [data-opening-id], [data-object-id], [data-room-id]');
+    if (this.tool === 'select') target = this.nearestSelectionTarget(world, target);
     this.doubleClickSelection = target?.dataset.openingId && (target.dataset.openingType === 'door' || target.dataset.openingType === 'window')
       ? { type: target.dataset.openingType, id: target.dataset.openingId }
       : target?.dataset.wallId
@@ -481,6 +482,50 @@ export class FloorPlanEditor {
     if (!this.canEditSelection({ type: 'wall', id: wall.id })) return;
     this.select({ type: 'wall', id: wall.id });
     this.onMeasure?.(structuredClone(wall));
+  }
+
+  private nearestSelectionTarget(world: Point, target: SVGElement | null): SVGElement | null {
+    if (target?.dataset.endpoint || target?.dataset.resizeObject === 'true') return target;
+    const matrix = this.svg.getScreenCTM?.();
+    const scale = matrix ? Math.hypot(matrix.a, matrix.b) : 0;
+    const tolerance = scale ? 20 / scale : this.viewBox.width * 20 / Math.max(this.svg.clientWidth, 300);
+    let nearest: SVGElement | null = null;
+    let nearestDistance = tolerance;
+    const candidates = this.svg.querySelectorAll<SVGElement>('line.editor-wall, line.editor-opening, rect.editor-object');
+    for (const candidate of candidates) {
+      let selection: EditorSelection = null;
+      if (candidate.dataset.openingId && (candidate.dataset.openingType === 'door' || candidate.dataset.openingType === 'window')) {
+        selection = { type: candidate.dataset.openingType, id: candidate.dataset.openingId };
+      } else if (candidate.dataset.wallId) selection = { type: 'wall', id: candidate.dataset.wallId };
+      else if (candidate.dataset.objectId) selection = { type: 'object', id: candidate.dataset.objectId };
+      if (!selection || !this.canEditSelection(selection)) continue;
+      const distance = this.selectionTargetDistance(world, candidate, selection);
+      if (distance <= nearestDistance) {
+        nearest = candidate;
+        nearestDistance = distance;
+      }
+    }
+    return nearest ?? target;
+  }
+
+  private selectionTargetDistance(world: Point, candidate: SVGElement, selection: NonNullable<EditorSelection>): number {
+    if (candidate.tagName.toLowerCase() === 'line') {
+      const start = { xMeters: Number(candidate.getAttribute('x1')), yMeters: Number(candidate.getAttribute('y1')) };
+      const end = { xMeters: Number(candidate.getAttribute('x2')), yMeters: Number(candidate.getAttribute('y2')) };
+      return distanceBetween(world, nearestPointOnSegment(world, start, end));
+    }
+    const x = Number(candidate.getAttribute('x'));
+    const y = Number(candidate.getAttribute('y'));
+    const object = this.room.objects.find((item) => item.id === selection.id);
+    const elevation = this.view === 'floor' && object?.wallMount ? wallElevation(this.room, object.wallMount.wallId) : null;
+    const angle = elevation ? Math.atan2(elevation.axis.yMeters, elevation.axis.xMeters) : 0;
+    const dx = world.xMeters - x;
+    const dy = world.yMeters - y;
+    const localX = dx * Math.cos(angle) + dy * Math.sin(angle);
+    const localY = -dx * Math.sin(angle) + dy * Math.cos(angle);
+    const width = Number(candidate.getAttribute('width'));
+    const height = Number(candidate.getAttribute('height'));
+    return Math.hypot(Math.max(-localX, 0, localX - width), Math.max(-localY, 0, localY - height));
   }
 
   private handleSelectionPointer(world: Point, target: SVGElement | null): void {
