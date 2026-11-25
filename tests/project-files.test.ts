@@ -1,7 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { copyImportedProject, parseProjectFile, projectFilename, serializeProject } from '../src/data/project-files';
 import { createProject } from '../src/domain/models';
 import { ProjectValidationError } from '../src/data/schema';
+import { SiteMeasureApp } from '../src/app';
+import type { DebugLog } from '../src/debug-log';
+
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('project files', () => {
   it('round-trips a validated project', () => {
@@ -52,5 +56,71 @@ describe('project files', () => {
     const project = createProject('Invalid mount');
     project.buildings[0].floors[0].rooms[0].objects.push({ id: 'socket', name: 'Socket', widthMeters: 0.1, depthMeters: 0.1, heightMeters: 0.1, wallMount: { wallId: 'wall', offsetMeters: 1, elevationMeters: -1 } });
     expect(() => serializeProject(project)).toThrow(ProjectValidationError);
+  });
+
+  it('records each project download step without logging project contents', () => {
+    const log = vi.fn();
+    const root = document.createElement('div');
+    document.body.append(root);
+    const app = new SiteMeasureApp(root, undefined, { log } as unknown as DebugLog) as unknown as { exportProject(project: ReturnType<typeof createProject>): void };
+    const objectUrl = vi.fn(() => 'blob:test');
+    const revoke = vi.fn();
+    vi.stubGlobal('URL', Object.assign(class extends URL {}, { createObjectURL: objectUrl, revokeObjectURL: revoke }));
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    const project = createProject('Example');
+    project.description = 'Private project contents';
+    app.exportProject(project);
+    const steps = log.mock.calls.filter(([type]) => type === 'project-export').map(([, detail]) => detail.step);
+    expect(steps).toEqual(['starting', 'serializing', 'serialized', 'blob-created', 'creating-object-url', 'object-url-created', 'link-created', 'clicking-link', 'link-click-returned', 'revoking-object-url', 'object-url-revoked', 'download-requested']);
+    expect(JSON.stringify(log.mock.calls)).not.toContain('Private project contents');
+    expect(objectUrl).toHaveBeenCalledOnce();
+    expect(revoke).toHaveBeenCalledWith('blob:test');
+    expect(root.querySelector('.toast')?.textContent).toContain('download requested');
+    root.remove();
+  });
+
+  it('records serialization failures and reports them without requesting a download', () => {
+    const log = vi.fn();
+    const root = document.createElement('div');
+    document.body.append(root);
+    const app = new SiteMeasureApp(root, undefined, { log } as unknown as DebugLog) as unknown as { exportProject(project: ReturnType<typeof createProject>): void };
+    const project = createProject('Invalid');
+    project.buildings[0].floors[0].rooms[0].measurements.push({ id: 'bad', targetType: 'wall', targetId: 'missing', valueMeters: NaN, capturedAt: new Date().toISOString(), source: 'manual' });
+    app.exportProject(project);
+    expect(log).toHaveBeenCalledWith('project-export.failed', expect.objectContaining({ stage: 'serializing', error: expect.stringContaining('ProjectValidationError') }));
+    expect(log).toHaveBeenCalledWith('project-export.error', expect.any(ProjectValidationError));
+    expect(root.querySelector('.toast')?.textContent).toContain('export failed');
+    root.remove();
+  });
+
+  it('identifies a failed download click even after object URL cleanup', () => {
+    const log = vi.fn();
+    const root = document.createElement('div');
+    document.body.append(root);
+    const app = new SiteMeasureApp(root, undefined, { log } as unknown as DebugLog) as unknown as { exportProject(project: ReturnType<typeof createProject>): void };
+    const revoke = vi.fn();
+    vi.stubGlobal('URL', Object.assign(class extends URL {}, { createObjectURL: () => 'blob:test', revokeObjectURL: revoke }));
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => { throw new Error('Download blocked'); });
+    app.exportProject(createProject('Example'));
+    expect(log).toHaveBeenCalledWith('project-export.failed', { stage: 'clicking-link', error: 'Error: Download blocked' });
+    expect(log).toHaveBeenCalledWith('project-export', expect.objectContaining({ step: 'object-url-revoked' }));
+    expect(revoke).toHaveBeenCalledWith('blob:test');
+    expect(root.querySelector('.toast')?.textContent).toContain('export failed');
+    root.remove();
+  });
+
+  it('selects the debug log for copying when clipboard access is unavailable', () => {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const session = { enabled: false, startedAt: '2026-01-01', stoppedAt: '2026-01-01', entries: [{ time: 'now', type: 'project-export', detail: 'download-requested' }], dropped: 0 };
+    const app = new SiteMeasureApp(root, undefined, { log: vi.fn(), current: session } as unknown as DebugLog) as unknown as { showDebugLog(): void };
+    const dialog = root.querySelector<HTMLDialogElement>('dialog')!;
+    dialog.showModal = () => dialog.setAttribute('open', '');
+    app.showDebugLog();
+    [...dialog.querySelectorAll('button')].find((item) => item.textContent === 'Copy log')!.click();
+    expect(window.getSelection()?.toString()).toContain('download-requested');
+    expect(dialog.querySelector('[role="status"]')?.textContent).toContain('Use your device copy command');
+    window.getSelection()?.removeAllRanges();
+    root.remove();
   });
 });

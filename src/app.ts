@@ -1318,9 +1318,24 @@ export class SiteMeasureApp {
     title.id = 'dialog-title';
     const log = element('pre', 'debug-log');
     log.textContent = session.entries.map((entry) => `${entry.time} ${entry.type}\n${entry.detail}`).join('\n\n');
+    const copyStatus = element('p', 'bluetooth-detail');
+    copyStatus.setAttribute('role', 'status');
     const actions = element('div', 'dialog-actions');
-    actions.append(button('Export', 'button primary', () => this.exportDebugLog()), button('Close', 'button quiet', () => dialog.close()));
-    content.append(title, element('p', '', `${session.entries.length} entries${session.dropped ? `; ${session.dropped} older entries removed` : ''}`), log, actions);
+    actions.append(button('Copy log', 'button quiet', () => {
+      const selectLog = () => {
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(log);
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+        copyStatus.textContent = 'Log selected. Use your device copy command.';
+      };
+      if (!navigator.clipboard?.writeText) { selectLog(); return; }
+      void navigator.clipboard.writeText(log.textContent ?? '').then(() => {
+        copyStatus.textContent = 'Log copied.';
+      }, selectLog);
+    }), button('Export', 'button primary', () => this.exportDebugLog()), button('Close', 'button quiet', () => dialog.close()));
+    content.append(title, element('p', '', `${session.entries.length} entries${session.dropped ? `; ${session.dropped} older entries removed` : ''}`), log, copyStatus, actions);
     dialog.replaceChildren(content);
     this.openDialog(dialog);
   }
@@ -1825,11 +1840,38 @@ export class SiteMeasureApp {
   }
 
   private exportProject(project: Project, includePhotos = true): void {
-    const exported = includePhotos ? project : structuredClone(project);
-    if (!includePhotos) exported.buildings.forEach((building) => building.floors.forEach((floor) => floor.rooms.forEach((room) => { room.photos = []; })));
-    const blob = new Blob([serializeProject(exported)], { type: 'application/json' });
-    this.downloadBlob(blob, projectFilename(exported));
-    this.showToast(includePhotos ? `${project.name} exported` : `${project.name} exported without photos`);
+    let stage = 'starting';
+    let failureStage: string | undefined;
+    const report = (step: string, detail: Record<string, unknown> = {}) => {
+      if (step === 'download-step-failed') failureStage = stage;
+      stage = step;
+      this.debugLog?.log('project-export', { step, ...detail });
+    };
+    try {
+      const rooms = project.buildings.flatMap((building) => building.floors.flatMap((floor) => floor.rooms));
+      report('starting', {
+        includePhotos, rooms: rooms.length, photos: rooms.reduce((count, room) => count + room.photos.length, 0),
+        userAgent: navigator.userAgent, platform: navigator.platform, protocol: window.location.protocol,
+        userActivation: navigator.userActivation?.isActive ?? null,
+        createObjectURL: typeof URL.createObjectURL === 'function', revokeObjectURL: typeof URL.revokeObjectURL === 'function',
+        share: typeof navigator.share === 'function',
+      });
+      const exported = includePhotos ? project : structuredClone(project);
+      if (!includePhotos) exported.buildings.forEach((building) => building.floors.forEach((floor) => floor.rooms.forEach((room) => { room.photos = []; })));
+      report('serializing');
+      const serialized = serializeProject(exported);
+      report('serialized', { characters: serialized.length });
+      const blob = new Blob([serialized], { type: 'application/json' });
+      const filename = projectFilename(exported);
+      report('blob-created', { bytes: blob.size, mimeType: blob.type, filename });
+      this.downloadBlob(blob, filename, report);
+      report('download-requested', { browserConfirmationAvailable: false });
+      this.showToast('Project download requested. Check your browser downloads.');
+    } catch (error) {
+      this.debugLog?.log('project-export.failed', { stage: failureStage ?? stage, error: error instanceof Error ? `${error.name}: ${error.message}` : String(error) });
+      this.debugLog?.log('project-export.error', error);
+      this.showToast('Project export failed. Check the debug log for details.');
+    }
   }
 
   private async exportRoomPng(project: Project, room: Room): Promise<void> {
@@ -1861,13 +1903,26 @@ export class SiteMeasureApp {
     this.downloadBlob(new Blob([text], { type: `${mimeType};charset=utf-8` }), filename);
   }
 
-  private downloadBlob(blob: Blob, filename: string): void {
+  private downloadBlob(blob: Blob, filename: string, report?: (step: string, detail?: Record<string, unknown>) => void): void {
+    report?.('creating-object-url');
     const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    link.click();
-    URL.revokeObjectURL(url);
+    try {
+      report?.('object-url-created', { scheme: url.split(':', 1)[0] });
+      const link = document.createElement('a');
+      report?.('link-created', { downloadAttributeSupported: 'download' in link });
+      link.href = url;
+      link.download = filename;
+      report?.('clicking-link', { userActivation: navigator.userActivation?.isActive ?? null, attachedToDocument: link.isConnected });
+      link.click();
+      report?.('link-click-returned');
+    } catch (error) {
+      report?.('download-step-failed', { error: error instanceof Error ? `${error.name}: ${error.message}` : String(error) });
+      throw error;
+    } finally {
+      report?.('revoking-object-url');
+      URL.revokeObjectURL(url);
+      report?.('object-url-revoked');
+    }
   }
 
   private openProject(projectId: string): void {
