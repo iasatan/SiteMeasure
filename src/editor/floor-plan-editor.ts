@@ -2045,6 +2045,39 @@ export class FloorPlanEditor {
       dimensions.append(overall);
       this.svg.append(dimensions);
     }
+    this.hideOverlappingDimensionLabels();
+  }
+
+  private hideOverlappingDimensionLabels(): void {
+    const labels = [...this.svg.querySelectorAll<SVGTextElement>('.editor-dimension')]
+      .filter((label) => label.style.visibility !== 'hidden')
+      .map((label) => {
+        const fontSize = Number.parseFloat(label.style.fontSize);
+        const angle = Number(label.getAttribute('transform')?.match(/^rotate\(([-\d.]+)/)?.[1] ?? 0) * Math.PI / 180;
+        const halfTextWidth = label.textContent!.length * fontSize * 0.52 / 2;
+        const halfTextHeight = fontSize / 2;
+        const halfWidth = Math.abs(Math.cos(angle)) * halfTextWidth + Math.abs(Math.sin(angle)) * halfTextHeight;
+        const halfHeight = Math.abs(Math.sin(angle)) * halfTextWidth + Math.abs(Math.cos(angle)) * halfTextHeight;
+        const group = label.closest<SVGGElement>('.editor-dimension-group');
+        return {
+          label,
+          x: Number(label.getAttribute('x')),
+          y: Number(label.getAttribute('y')),
+          halfWidth,
+          halfHeight,
+          priority: group?.dataset.dimensionPart === 'overall' ? 1 : 0,
+        };
+      })
+      .sort((left, right) => right.priority - left.priority || right.halfWidth - left.halfWidth);
+    const visible: typeof labels = [];
+    for (const candidate of labels) {
+      const overlaps = visible.some((other) =>
+        Math.abs(candidate.x - other.x) < candidate.halfWidth + other.halfWidth + 0.03
+        && Math.abs(candidate.y - other.y) < candidate.halfHeight + other.halfHeight + 0.03,
+      );
+      if (overlaps) candidate.label.style.visibility = 'hidden';
+      else visible.push(candidate);
+    }
   }
 
   private outwardDimensionNormal(start: Point, end: Point): Point {
@@ -2099,6 +2132,9 @@ export class FloorPlanEditor {
     label.setAttribute('y', String(midpoint.yMeters));
     label.setAttribute('transform', `rotate(${angle} ${midpoint.xMeters} ${midpoint.yMeters})`);
     label.textContent = formatLength(length, this.units);
+    const fontSize = Math.min(0.28, length * 0.85 / (label.textContent.length * 0.52));
+    if (fontSize < 0.12) label.style.visibility = 'hidden';
+    else label.style.fontSize = `${fontSize}px`;
     group.append(label);
     return group;
   }

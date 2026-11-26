@@ -801,6 +801,24 @@ describe('floor plan editor', () => {
     expect(detailLines.every((line) => Number(line.getAttribute('y1')) < 0)).toBe(true);
   });
 
+  it('scales dimension labels to short walls and omits labels that cannot fit', () => {
+    const room = createRoom();
+    room.points = [[0, 0], [0.927, 0], [0.927, 0.783], [1.8, 0.783], [1.8, 2.11], [0, 2.11]].map(([xMeters, yMeters]) => ({ xMeters, yMeters }));
+    room.walls = room.points.map((start, index) => ({ id: `wall${index}`, start, end: room.points[(index + 1) % room.points.length], thicknessMeters: 0.15 }));
+    expect(room.walls).toHaveLength(6);
+    const editor = new FloorPlanEditor({ room, units: 'metric', onChange: () => {}, onSelection: () => {} });
+    const shortWallLabel = editor.element.querySelector<SVGTextElement>('[data-dimension-wall-id="wall0"] .editor-dimension')!;
+    expect(Number.parseFloat(shortWallLabel.style.fontSize)).toBeLessThan(0.28);
+    expect(editor.element.querySelectorAll('.editor-dimension[style*="visibility: hidden"]').length).toBeGreaterThan(0);
+
+    const internals = editor as unknown as EditorInternals;
+    internals.selection = { type: 'wall', id: 'wall0' };
+    internals.addDoorToSelectedWall(0.6);
+    const shortSegmentLabel = editor.element.querySelector<SVGTextElement>('[data-dimension-part="left"] .editor-dimension')!;
+    expect(shortSegmentLabel.style.visibility).toBe('hidden');
+    expect(editor.element.querySelector('[data-dimension-part="left"] .editor-dimension-line')).not.toBeNull();
+  });
+
   it('opens the matching editor when a wall or door dimension is tapped', () => {
     const calls: string[] = [];
     const room = createRoom();
