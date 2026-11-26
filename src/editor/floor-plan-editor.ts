@@ -1,5 +1,5 @@
 import { createId, DEFAULT_DOOR_HEIGHT_METERS, DEFAULT_WINDOW_HEIGHT_METERS, type Door, type EditingLayer, type Measurement, type Point, type Room, type RoomObject, type Wall, type Window } from '../domain/models';
-import { cornerAngleDegrees, distanceBetween, formatLength, nearestPointOnSegment, perpendicularPoint, pointOnWall, polygonIssues, roomArea, roomHeight, setCornerAngle, snapPoint, wallElevation, type WallElevation } from '../geometry';
+import { cornerAngleDegrees, distanceBetween, formatArea, formatLength, nearestPointOnSegment, perpendicularPoint, pointOnWall, polygonIssues, roomArea, roomHeight, setCornerAngle, snapPoint, wallElevation, type WallElevation } from '../geometry';
 
 export type EditorTool = 'select' | 'wall' | 'room' | 'door' | 'window' | 'object' | 'measure';
 export type EditorSelection = { type: 'wall' | 'room' | 'object' | 'door' | 'window'; id: string } | null;
@@ -101,13 +101,22 @@ export class FloorPlanEditor {
     this.svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     this.svg.classList.add('editor-svg');
     this.svg.setAttribute('role', 'application');
+    this.svg.setAttribute('tabindex', '0');
     this.svg.setAttribute('aria-label', `Editable floor plan for ${this.room.name}`);
+    this.svg.setAttribute('aria-describedby', 'editor-keyboard-help');
+    this.svg.setAttribute('aria-keyshortcuts', 'ArrowUp ArrowDown Enter Delete Backspace Escape Ctrl+Z Ctrl+Shift+Z Ctrl+Y');
     this.summary = document.createElement('div');
     this.summary.className = 'editor-summary';
     this.summary.setAttribute('aria-live', 'polite');
+    this.summary.id = 'editor-summary';
+    const keyboardHelp = document.createElement('p');
+    keyboardHelp.className = 'visually-hidden';
+    keyboardHelp.id = 'editor-keyboard-help';
+    keyboardHelp.textContent = 'Focus the plan, use Up and Down to select geometry, Enter to edit or measure, Delete to remove, and Control or Command with Z for undo or Shift Z for redo. Tool shortcuts: V select, W wall, R room, D door, N window, O object, M measure. Escape returns to Select.';
 
-    this.element.append(this.viewControls, this.buildUtilityRow(), this.svg, this.summary, this.controls);
+    this.element.append(this.viewControls, this.buildUtilityRow(), keyboardHelp, this.svg, this.summary, this.controls);
     this.bindPointerEvents();
+    this.bindKeyboardEvents();
     this.render();
     this.fitDrawing();
   }
@@ -461,17 +470,23 @@ export class FloorPlanEditor {
       this.actionButton('Grid', 'Toggle grid', (button) => {
         this.showGrid = !this.showGrid;
         button?.classList.toggle('is-active', this.showGrid);
+        button?.setAttribute('aria-pressed', String(this.showGrid));
         this.render();
       }, this.showGrid),
       this.actionButton('Snap', 'Toggle snapping', (button) => {
         this.snap = !this.snap;
         button?.classList.toggle('is-active', this.snap);
+        button?.setAttribute('aria-pressed', String(this.snap));
       }, this.snap),
       this.actionButton('90°', 'Toggle right-angle corners while drawing', (button) => {
         this.rightAngles = !this.rightAngles;
         button?.classList.toggle('is-active', this.rightAngles);
+        button?.setAttribute('aria-pressed', String(this.rightAngles));
       }, this.rightAngles),
     );
+    row.querySelector('[aria-label="Toggle grid"]')?.setAttribute('aria-pressed', String(this.showGrid));
+    row.querySelector('[aria-label="Toggle snapping"]')?.setAttribute('aria-pressed', String(this.snap));
+    row.querySelector('[aria-label="Toggle right-angle corners while drawing"]')?.setAttribute('aria-pressed', String(this.rightAngles));
     return row;
   }
 
@@ -502,6 +517,84 @@ export class FloorPlanEditor {
       const target = (event.target as Element).closest<SVGElement>('[data-wall-id], [data-opening-id], [data-object-id], [data-room-id]');
       this.handleDoubleClick(this.doubleClickSelection ? null : target, this.doubleClickSelection);
     });
+  }
+
+  private bindKeyboardEvents(): void {
+    this.svg.addEventListener('keydown', (event) => {
+      if (event.target !== this.svg) return;
+      this.handleKeyboardEvent(event);
+    });
+  }
+
+  private handleKeyboardEvent(event: KeyboardEvent): void {
+    if (this.handleHistoryShortcut(event) || this.handleToolShortcut(event)) return;
+    switch (event.key) {
+      case 'ArrowDown':
+      case 'ArrowUp':
+        event.preventDefault();
+        this.cycleKeyboardSelection(event.key === 'ArrowDown' ? 1 : -1);
+        break;
+      case 'Enter':
+        event.preventDefault();
+        this.editKeyboardSelection();
+        break;
+      case 'Delete':
+      case 'Backspace':
+        event.preventDefault();
+        this.deleteSelection();
+        break;
+      case 'Escape':
+        event.preventDefault();
+        if (this.tool !== 'select') this.setTool('select');
+        else this.select(null);
+        break;
+    }
+  }
+
+  private handleHistoryShortcut(event: KeyboardEvent): boolean {
+    if (!event.ctrlKey && !event.metaKey) return false;
+    const key = event.key.toLowerCase();
+    if (key !== 'z' && key !== 'y') return false;
+    event.preventDefault();
+    if (key === 'y' || event.shiftKey) this.redo();
+    else this.undo();
+    return true;
+  }
+
+  private handleToolShortcut(event: KeyboardEvent): boolean {
+    if (event.altKey) return false;
+    const tool = ({ v: 'select', w: 'wall', r: 'room', d: 'door', n: 'window', o: 'object', m: 'measure' } as Record<string, EditorTool>)[event.key.toLowerCase()];
+    if (!tool || !this.allowedTools().includes(tool)) return false;
+    event.preventDefault();
+    this.setTool(tool);
+    return true;
+  }
+
+  private cycleKeyboardSelection(direction: -1 | 1): void {
+    const options: NonNullable<EditorSelection>[] = [
+      ...this.room.walls.map((wall) => ({ type: 'wall' as const, id: wall.id })),
+      ...this.room.doors.map((door) => ({ type: 'door' as const, id: door.id })),
+      ...this.room.windows.map((window) => ({ type: 'window' as const, id: window.id })),
+      ...this.room.objects.map((object) => ({ type: 'object' as const, id: object.id })),
+      ...(this.room.points.length >= 3 ? [{ type: 'room' as const, id: this.room.id }] : []),
+    ].filter((selection) => this.canEditSelection(selection));
+    if (!options.length) return;
+    const currentIndex = options.findIndex((selection) => selection.type === this.selection?.type && selection.id === this.selection.id);
+    const nextIndex = (currentIndex + direction + options.length) % options.length;
+    this.select(options[nextIndex]);
+  }
+
+  private editKeyboardSelection(): void {
+    if (this.selection?.type === 'wall') {
+      const wall = this.selectedWall();
+      if (wall) this.onMeasure?.(structuredClone(wall));
+    } else if (this.selection?.type === 'object') {
+      this.onMeasureObject?.(this.selection.id);
+    } else if (this.selection?.type === 'door' || this.selection?.type === 'window') {
+      this.onOpening?.(this.selection.type, this.selection.id);
+    } else if (this.selection?.type === 'room') {
+      this.fitSelection();
+    }
   }
 
   private handleDoubleClick(target: SVGElement | null, fallback: EditorSelection = null): void {
@@ -1282,7 +1375,7 @@ export class FloorPlanEditor {
     if (selected) return `${formatLength(distanceBetween(selected.start, selected.end), this.units)} selected`;
     if (area > 0) {
       const issueText = issues.length ? ` · ${issues[0]}` : '';
-      return `${area.toFixed(2)} m² plan${issueText}`;
+      return `${formatArea(area, this.units)} plan${issueText}`;
     }
     return toolHint(this.tool, this.drawingPoints.length);
   }
@@ -1689,9 +1782,12 @@ export class FloorPlanEditor {
   private renderTools(): void {
     this.controls.replaceChildren();
     const tools: Array<[EditorTool, string]> = [['select', 'Select'], ['wall', 'Wall'], ['room', 'Room'], ['door', 'Door'], ['window', 'Window'], ['object', 'Object'], ['measure', 'Measure']];
+    const shortcuts: Record<EditorTool, string> = { select: 'V', wall: 'W', room: 'R', door: 'D', window: 'N', object: 'O', measure: 'M' };
     for (const [tool, label] of tools) {
       if (!this.allowedTools().includes(tool)) continue;
       const button = this.actionButton(label, `${label} tool`, () => this.setTool(tool), this.tool === tool);
+      button.setAttribute('aria-pressed', String(this.tool === tool));
+      button.setAttribute('aria-keyshortcuts', shortcuts[tool]);
       this.controls.append(button);
     }
     const undo = this.actionButton('Undo', 'Undo last edit', () => this.undo());

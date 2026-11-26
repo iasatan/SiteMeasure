@@ -1,7 +1,7 @@
 import type { ObjectPart } from './furniture';
 
 export const SCHEMA_VERSION = 1 as const;
-export const APPLICATION_VERSION = '0.1.0';
+export const APPLICATION_VERSION = __APP_VERSION__;
 
 export type Unit = 'metric' | 'imperial';
 export type ProjectStatus = 'active' | 'complete' | 'archived';

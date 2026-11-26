@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createRoom } from '../src/domain/models';
 import { FloorPlanEditor } from '../src/editor/floor-plan-editor';
 
@@ -34,6 +34,39 @@ describe('floor plan editor', () => {
     Object.assign(event, { pointerId: 1, pointerType: 'mouse' });
     svg.dispatchEvent(event);
   }
+
+  it('exposes keyboard tool shortcuts and pressed toolbar state', () => {
+    const editor = new FloorPlanEditor({ room: createRoom(), layer: 'builder', units: 'metric', onChange: () => {}, onSelection: () => {} });
+    const svg = editor.element.querySelector<SVGSVGElement>('svg')!;
+    expect(svg.getAttribute('tabindex')).toBe('0');
+    expect(svg.getAttribute('aria-describedby')).toBe('editor-keyboard-help');
+    svg.dispatchEvent(new KeyboardEvent('keydown', { key: 'w', bubbles: true }));
+    expect(editor.element.querySelector('[aria-keyshortcuts="W"]')?.getAttribute('aria-pressed')).toBe('true');
+    svg.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(editor.element.querySelector('[aria-keyshortcuts="V"]')?.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('selects and edits geometry from the keyboard and supports undo and redo shortcuts', () => {
+    const room = createRoom();
+    room.points = [[0, 0], [4, 0], [4, 4], [0, 4]].map(([xMeters, yMeters]) => ({ xMeters, yMeters }));
+    room.walls = room.points.map((start, index) => ({ id: `wall${index}`, start, end: room.points[(index + 1) % 4], thicknessMeters: 0.15 }));
+    const onSelection = vi.fn();
+    const onMeasure = vi.fn();
+    const editor = new FloorPlanEditor({ room, layer: 'builder', units: 'metric', onChange: () => {}, onSelection, onMeasure });
+    const svg = editor.element.querySelector<SVGSVGElement>('svg')!;
+    const key = (keyName: string, options: KeyboardEventInit = {}) => svg.dispatchEvent(new KeyboardEvent('keydown', { key: keyName, bubbles: true, ...options }));
+
+    key('ArrowDown');
+    expect(onSelection).toHaveBeenLastCalledWith({ type: 'wall', id: 'wall0' });
+    key('Enter');
+    expect(onMeasure).toHaveBeenCalledWith(expect.objectContaining({ id: 'wall0' }));
+    key('Delete');
+    expect(editor.getRoom().walls).toHaveLength(3);
+    key('z', { ctrlKey: true });
+    expect(editor.getRoom().walls).toHaveLength(4);
+    key('z', { ctrlKey: true, shiftKey: true });
+    expect(editor.getRoom().walls).toHaveLength(3);
+  });
 
   it('previews approximate mouse dimensions without committing room points', () => {
     const editor = new FloorPlanEditor({ room: createRoom(), layer: 'builder', units: 'metric', onChange: () => {}, onSelection: () => {} });

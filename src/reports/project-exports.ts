@@ -1,5 +1,5 @@
 import type { Project, Room } from '../domain/models';
-import { distanceBetween, openingArea, polygonIssues, roomArea, roomHeight, roomVolume, wallArea } from '../geometry';
+import { distanceBetween, formatArea, formatLength, formatVolume, openingArea, polygonIssues, roomArea, roomHeight, roomVolume, wallArea } from '../geometry';
 
 export function measurementsCsv(project: Project): string {
   const rows: string[][] = [['Project', 'Building', 'Floor', 'Room', 'Target type', 'Target ID', 'Value (m)', 'Captured at', 'Source', 'Device', 'Clearance side', 'Wall ID']];
@@ -91,7 +91,7 @@ function reportRoom(project: Project, building: string, floor: string, room: Roo
   }).join('');
   const location = escapeHtml(building + ' / ' + floor + ' / ' + room.name);
   const warning = issues.length ? `<p class="warning">${escapeHtml(issues.join(' '))}</p>` : '';
-  return `<section><h2>${location}</h2><div class="facts"><p><strong>Area:</strong> ${roomArea(room).toFixed(2)} m²</p><p><strong>Volume:</strong> ${roomVolume(room).toFixed(2)} m³</p><p><strong>Net wall area:</strong> ${wallArea(room.walls, roomHeight(room), openingArea(room.walls, room)).toFixed(2)} m²</p><p><strong>Measurements:</strong> ${room.measurements.length}</p></div>${warning}<div>${measurements || '<p>No measurements recorded.</p>'}</div><div>${notes}</div><div>${photos}</div><p>Preferred units: ${escapeHtml(project.preferredUnits)}</p></section>`;
+  return `<section><h2>${location}</h2><div class="facts"><p><strong>Area:</strong> ${formatArea(roomArea(room), project.preferredUnits)}</p><p><strong>Volume:</strong> ${formatVolume(roomVolume(room), project.preferredUnits)}</p><p><strong>Net wall area:</strong> ${formatArea(wallArea(room.walls, roomHeight(room), openingArea(room.walls, room)), project.preferredUnits)}</p><p><strong>Measurements:</strong> ${room.measurements.length}</p></div>${warning}<div>${measurements || '<p>No measurements recorded.</p>'}</div><div>${notes}</div><div>${photos}</div><p>Preferred units: ${escapeHtml(project.preferredUnits)} · room height ${formatLength(roomHeight(room), project.preferredUnits)}</p></section>`;
 }
 
 export function csvCell(value: string): string {

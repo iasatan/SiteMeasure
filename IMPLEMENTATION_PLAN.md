@@ -38,7 +38,11 @@
 
 ## Phase 5: PWA and completion
 
-Offline shell, backups, restore, Safari/iPad acceptance checks, accessibility hardening, and operational documentation.
+- [x] Add validated full-workspace backup export, restore preview, pre-replacement export, and rollback on storage failure.
+- [ ] Add a versioned offline shell with update behavior and offline acceptance tests.
+- [ ] Complete Safari/iPad, screen-reader, responsive, storage quota, and physical-device acceptance checks.
+- [ ] Finish keyboard access and accessibility hardening across the plan editor and dialogs.
+- [ ] Complete operational documentation for verified browser/device behavior.
 
 ## Phase 1 Completion Notes
 

@@ -96,6 +96,16 @@ export function feetToMeters(feet: number): number {
   return feet / 3.280839895;
 }
 
+export function formatArea(squareMeters: number, preferredUnits: 'metric' | 'imperial'): string {
+  if (preferredUnits === 'imperial') return `${(squareMeters * 3.280839895 ** 2).toFixed(2)} ft²`;
+  return `${squareMeters.toFixed(2)} m²`;
+}
+
+export function formatVolume(cubicMeters: number, preferredUnits: 'metric' | 'imperial'): string {
+  if (preferredUnits === 'imperial') return `${(cubicMeters * 3.280839895 ** 3).toFixed(2)} ft³`;
+  return `${cubicMeters.toFixed(2)} m³`;
+}
+
 export function formatLength(meters: number, preferredUnits: 'metric' | 'imperial'): string {
   if (preferredUnits === 'imperial') return `${metersToFeet(meters).toFixed(2)} ft`;
   if (meters < 1) return `${Math.round(meters * 1000)} mm`;

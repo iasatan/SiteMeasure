@@ -19,6 +19,11 @@ export const STORAGE_KEYS = {
 
 export type RepositoryWarning = (message: string) => void;
 
+interface ProjectStorageSnapshot {
+  projects: Map<string, string>;
+  index: string | null;
+}
+
 export class ProjectPersistenceError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
@@ -86,6 +91,59 @@ export class LocalStorageProjectRepository implements ProjectRepository {
     } catch (error) {
       throw new ProjectPersistenceError(this.persistenceMessage(error), { cause: error });
     }
+  }
+
+  replaceAll(projects: Project[]): void {
+    const validated = projects.map(validateProject);
+    if (new Set(validated.map((project) => project.id)).size !== validated.length) {
+      throw new ProjectPersistenceError('The backup contains duplicate project IDs.');
+    }
+    const snapshot = this.snapshotProjectStorage();
+    try {
+      this.writeProjectSet(validated);
+    } catch (error) {
+      try {
+        this.restoreProjectStorage(snapshot);
+      } catch {
+        this.warn('Backup restore failed and local projects could not be fully restored. Keep this tab open and export the remaining data.');
+      }
+      throw new ProjectPersistenceError(this.persistenceMessage(error), { cause: error });
+    }
+  }
+
+  private snapshotProjectStorage(): ProjectStorageSnapshot {
+    const projects = new Map<string, string>();
+    for (const key of this.projectStorageKeys()) {
+      const value = this.storage.getItem(key);
+      if (value !== null) projects.set(key, value);
+    }
+    return { projects, index: this.storage.getItem(STORAGE_KEYS.projectIndex) };
+  }
+
+  private writeProjectSet(projects: Project[]): void {
+    this.clearProjectStorage();
+    for (const project of projects) this.storage.setItem(this.projectKey(project.id), JSON.stringify(project));
+    this.storage.setItem(STORAGE_KEYS.projectIndex, JSON.stringify(projects.map(summarizeProject)));
+  }
+
+  private restoreProjectStorage(snapshot: ProjectStorageSnapshot): void {
+    this.clearProjectStorage();
+    for (const [key, value] of snapshot.projects) this.storage.setItem(key, value);
+    if (snapshot.index === null) this.storage.removeItem(STORAGE_KEYS.projectIndex);
+    else this.storage.setItem(STORAGE_KEYS.projectIndex, snapshot.index);
+  }
+
+  private clearProjectStorage(): void {
+    for (const key of this.projectStorageKeys()) this.storage.removeItem(key);
+  }
+
+  private projectStorageKeys(): string[] {
+    const keys: string[] = [];
+    for (let index = 0; index < this.storage.length; index += 1) {
+      const key = this.storage.key(index);
+      if (key?.startsWith(STORAGE_KEYS.projectPrefix)) keys.push(key);
+    }
+    return keys;
   }
 
   duplicate(projectId: string): Project {

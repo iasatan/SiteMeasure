@@ -63,4 +63,35 @@ describe('LocalStorageProjectRepository', () => {
     const repository = new LocalStorageProjectRepository(storage);
     expect(() => repository.save(createProject('Large project'))).toThrow(ProjectPersistenceError);
   });
+
+  it('replaces all projects and rolls back a partial backup restore', () => {
+    localStorage.setItem(STORAGE_KEYS.schemaVersion, '1');
+    const existing = createProject('Existing project');
+    const incoming = createProject('Incoming project');
+    const initialRepository = new LocalStorageProjectRepository(localStorage);
+    initialRepository.save(existing);
+
+    let failed = false;
+    const storage = new Proxy(localStorage, {
+      get(target, property) {
+        if (property === 'setItem') return (key: string, value: string) => {
+          if (!failed && key === `${STORAGE_KEYS.projectPrefix}${incoming.id}`) {
+            failed = true;
+            throw new DOMException('Quota reached', 'QuotaExceededError');
+          }
+          target.setItem(key, value);
+        };
+        const value = Reflect.get(target, property, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const repository = new LocalStorageProjectRepository(storage);
+
+    expect(() => repository.replaceAll([incoming])).toThrow(ProjectPersistenceError);
+    expect(repository.get(existing.id)?.name).toBe(existing.name);
+    expect(repository.get(incoming.id)).toBeNull();
+    repository.replaceAll([incoming]);
+    expect(repository.get(existing.id)).toBeNull();
+    expect(repository.get(incoming.id)?.name).toBe(incoming.name);
+  });
 });

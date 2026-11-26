@@ -1,6 +1,6 @@
 # SiteMeasure
 
-SiteMeasure is a private, local-first construction measurement and floor-plan web application. Phase 1 provides the executable mobile-first project workspace, localStorage project storage, project CRUD, and validated project import/export.
+SiteMeasure is a private, local-first construction measurement and floor-plan web application. The current app includes project management, plans, measurements, Bluetooth capture boundaries, photos, reports, and validated project and full-workspace backup/restore.
 
 ## Run locally
 
@@ -26,7 +26,9 @@ The production output is written to `dist/` and uses relative asset paths for Gi
 
 Projects are stored only in browser `localStorage`. SiteMeasure does not transmit project data and contains no analytics, authentication, or backend service. Clearing Safari website data can delete local projects, so export important projects regularly.
 
-Current export format: `*.sitemeasure.json`.
+Project exports use `*.sitemeasure.json`; full local-workspace backups use `*.sitemeasure-backup.json`. Restoring a full backup replaces every local project after requesting a download of the current projects. Keep that recovery file before continuing.
+
+The web app shell is not cached and requires the site to load while online. Standalone exported 3D room files can be opened offline after download; this does not make the app itself available offline. The manifest supports browser installation, not offline operation.
 
 In Bluefy, project export uses the iOS share sheet when file sharing is supported; choose a destination such as Save to Files. If file sharing is unsupported or fails, a browser download is available instead. A completed share does not confirm that a file was saved.
 
@@ -50,13 +52,14 @@ In Photos, draw or select an arrow, rectangle, or circle and choose its length, 
 
 ## Current scope
 
-Phases 1 through 4 include:
+Shipped scope includes:
 
 - iPhone-first project dashboard and iPad adaptive project workspace;
 - create, open, rename, duplicate, archive, restore, delete, and undo deletion;
 - debounced metadata autosave and visible save failures;
 - schema-versioned repository with corrupt-entry protection and quota error handling;
 - validated project export/import, conflict preview, and copy ID remapping;
+- validated full-workspace backup export and replacement restore with preview and a pre-replacement backup;
 - SVG floor-plan editing in real-world meter coordinates;
 - wall and polygon room drawing, endpoint dragging, pan, pinch zoom, fit, grid, and snapping;
 - split/join, rotate, duplicate, copy/paste, lock, delete, and undo/redo;
@@ -68,7 +71,7 @@ Phases 1 through 4 include:
 - interactive 3D room views and self-contained HTML exports that work offline;
 - static GitHub Pages deployment workflow.
 
-Real Bosch hardware remains disabled until its device identifiers, GATT UUIDs, and packet format are verified. Manual measurements remain available. Backups and the offline service worker remain later-phase work.
+Real Bosch hardware remains disabled until its device identifiers, GATT UUIDs, and packet format are verified. Manual measurements remain available. Safari/iPad, Bluefy, screen-reader, and physical laser-device behavior have not been accepted on real devices; automated checks run in jsdom and do not establish those compatibility guarantees. An offline service worker and app-shell caching remain unfinished.
 
 ## Deployment
 

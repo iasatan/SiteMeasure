@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createRoom } from '../src/domain/models';
-import { cornerAngleDegrees, deriveOpeningSegments, distanceBetween, feetToMeters, metersToFeet, perpendicularPoint, polygonArea, polygonIssues, polygonPerimeter, roomVolume, setCornerAngle, wallArea } from '../src/geometry';
+import { cornerAngleDegrees, deriveOpeningSegments, distanceBetween, feetToMeters, formatArea, formatVolume, metersToFeet, perpendicularPoint, polygonArea, polygonIssues, polygonPerimeter, roomVolume, setCornerAngle, wallArea } from '../src/geometry';
 
 const rectangle = [
   { xMeters: 0, yMeters: 0 },
@@ -10,6 +10,13 @@ const rectangle = [
 ];
 
 describe('geometry', () => {
+  it('formats areas and volumes in the selected project units', () => {
+    expect(formatArea(1, 'metric')).toBe('1.00 m²');
+    expect(formatVolume(1, 'metric')).toBe('1.00 m³');
+    expect(formatArea(1, 'imperial')).toBe('10.76 ft²');
+    expect(formatVolume(1, 'imperial')).toBe('35.31 ft³');
+  });
+
   it('calculates distance, area, perimeter, and volume', () => {
     expect(distanceBetween(rectangle[0], rectangle[1])).toBe(5);
     expect(polygonArea(rectangle)).toBe(20);

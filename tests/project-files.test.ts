@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { copyImportedProject, parseProjectFile, projectFilename, serializeProject } from '../src/data/project-files';
-import { createProject } from '../src/domain/models';
+import { copyImportedProject, parseBackupFile, parseProjectFile, projectFilename, serializeBackup, serializeProject } from '../src/data/project-files';
+import { createProject, createRoom, type ProjectPhoto } from '../src/domain/models';
 import { ProjectValidationError } from '../src/data/schema';
 import { SiteMeasureApp } from '../src/app';
 import { LocalStorageProjectRepository } from '../src/data/local-storage-repository';
@@ -9,6 +9,105 @@ import type { DebugLog } from '../src/debug-log';
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('project files', () => {
+  it('warns while an autosave is pending and cancels that timer after an immediate save', () => {
+    vi.useFakeTimers();
+    const root = document.createElement('div');
+    const app = new SiteMeasureApp(root) as unknown as {
+      scheduleSave(project: ReturnType<typeof createProject>): void;
+      save(project: ReturnType<typeof createProject>): boolean;
+    };
+    const project = createProject('Pending save');
+    const save = vi.spyOn(LocalStorageProjectRepository.prototype, 'save');
+
+    app.scheduleSave(project);
+    const pendingUnload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(pendingUnload);
+    expect(pendingUnload.defaultPrevented).toBe(true);
+
+    expect(app.save(project)).toBe(true);
+    expect(save).toHaveBeenCalledOnce();
+    vi.advanceTimersByTime(650);
+    expect(save).toHaveBeenCalledOnce();
+    root.remove();
+  });
+
+  it('keeps warning about unsaved work after an autosave fails', () => {
+    vi.useFakeTimers();
+    const root = document.createElement('div');
+    const app = new SiteMeasureApp(root) as unknown as {
+      scheduleSave(project: ReturnType<typeof createProject>): void;
+    };
+    vi.spyOn(LocalStorageProjectRepository.prototype, 'save').mockImplementation(() => {
+      throw new Error('Storage unavailable');
+    });
+    app.scheduleSave(createProject('Failed save'));
+    vi.advanceTimersByTime(650);
+
+    const failedUnload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(failedUnload);
+    expect(failedUnload.defaultPrevented).toBe(true);
+    expect(root.querySelector('.save-indicator')?.textContent).toBe('Not saved');
+    root.remove();
+  });
+
+  it('names shared dialogs and preserves the delete dialog when persistence fails', () => {
+    const project = createProject('Delete failure');
+    new LocalStorageProjectRepository(localStorage).save(project);
+    const root = document.createElement('div');
+    const app = new SiteMeasureApp(root) as unknown as {
+      showManageDialog(projectId: string): void;
+      confirmDelete(project: ReturnType<typeof createProject>): void;
+    };
+    const dialog = root.querySelector<HTMLDialogElement>('.app-dialog')!;
+    dialog.showModal = () => dialog.setAttribute('open', '');
+    vi.spyOn(LocalStorageProjectRepository.prototype, 'delete').mockImplementation(() => {
+      throw new Error('Storage unavailable');
+    });
+
+    app.showManageDialog(project.id);
+    expect(dialog.getAttribute('aria-labelledby')).toBe('dialog-title');
+    expect(dialog.querySelector('#dialog-title')?.textContent).toBe(project.name);
+    app.confirmDelete(project);
+    [...dialog.querySelectorAll('button')].find((item) => item.textContent === 'Delete')!.click();
+
+    expect(dialog.open).toBe(true);
+    expect(root.querySelector('.notice')?.textContent).toBe('Storage unavailable');
+    expect(dialog.querySelector('#dialog-title')?.textContent).toBe('Delete local copy?');
+    root.remove();
+  });
+
+  it('reports duplicate and undo failures without discarding the project recovery state', () => {
+    const project = createProject('Mutation failure');
+    new LocalStorageProjectRepository(localStorage).save(project);
+    const root = document.createElement('div');
+    const app = new SiteMeasureApp(root) as unknown as {
+      showManageDialog(projectId: string): void;
+      confirmDelete(project: ReturnType<typeof createProject>): void;
+      undoDeletion: unknown;
+    };
+    const dialog = root.querySelector<HTMLDialogElement>('.app-dialog')!;
+    dialog.showModal = () => dialog.setAttribute('open', '');
+    dialog.close = () => dialog.removeAttribute('open');
+    vi.spyOn(LocalStorageProjectRepository.prototype, 'duplicate').mockImplementation(() => {
+      throw new Error('Duplicate unavailable');
+    });
+    app.showManageDialog(project.id);
+    [...dialog.querySelectorAll('button')].find((item) => item.textContent === 'Duplicate')!.click();
+    expect(dialog.open).toBe(true);
+    expect(root.querySelector('.notice')?.textContent).toBe('Duplicate unavailable');
+
+    vi.restoreAllMocks();
+    app.confirmDelete(project);
+    [...dialog.querySelectorAll('button')].find((item) => item.textContent === 'Delete')!.click();
+    vi.spyOn(LocalStorageProjectRepository.prototype, 'save').mockImplementation(() => {
+      throw new Error('Undo unavailable');
+    });
+    [...root.querySelectorAll<HTMLButtonElement>('.toast button')].find((item) => item.textContent === 'Undo')!.click();
+    expect(root.querySelector('.notice')?.textContent).toBe('Undo unavailable');
+    expect(app.undoDeletion).not.toBeNull();
+    root.remove();
+  });
+
   it('opens a new room ready to draw without replacing the existing room', () => {
     const project = createProject('New room drawing');
     const firstRoom = structuredClone(project.buildings[0].floors[0].rooms[0]);
@@ -28,13 +127,190 @@ describe('project files', () => {
     repository.delete(project.id);
   });
 
+  it('creates a room on the active room floor', () => {
+    const project = createProject('Multiple floors');
+    const upperRoom = createRoom('Upper room');
+    project.buildings[0].floors.push({ id: 'upper-floor', name: 'Upper floor', level: 1, rooms: [upperRoom] });
+    const repository = new LocalStorageProjectRepository(localStorage);
+    repository.save(project);
+    const root = document.createElement('div');
+    const app = new SiteMeasureApp(root) as unknown as {
+      addRoom(project: ReturnType<typeof createProject>): void;
+      activeRoomId: string;
+      selectedProjectId: string | null;
+      view: 'plan';
+    };
+    app.activeRoomId = upperRoom.id;
+    app.selectedProjectId = project.id;
+    app.view = 'plan';
+
+    app.addRoom(project);
+
+    const saved = repository.get(project.id)!;
+    expect(saved.buildings[0].floors[0].rooms).toHaveLength(1);
+    expect(saved.buildings[0].floors[1].rooms).toHaveLength(2);
+    expect(root.querySelector<HTMLSelectElement>('[aria-label="Current room"]')?.value).toBe(saved.buildings[0].floors[1].rooms[1].id);
+    root.remove();
+  });
+
+  it('does not let an older toast hide a newer message or expire deletion undo', () => {
+    vi.useFakeTimers();
+    const root = document.createElement('div');
+    const app = new SiteMeasureApp(root) as unknown as {
+      showToast(message: string, label?: string, action?: () => void): void;
+      undoDeletion: { project: ReturnType<typeof createProject>; expiresAt: number } | null;
+    };
+    app.undoDeletion = { project: createProject('Undo'), expiresAt: Date.now() + 30_000 };
+    app.showToast('Project deleted', 'Undo', () => {});
+    vi.advanceTimersByTime(10_000);
+    app.showToast('Another message');
+    vi.advanceTimersByTime(3_999);
+    expect(root.querySelector<HTMLElement>('.toast')?.hidden).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(root.querySelector<HTMLElement>('.toast')?.hidden).toBe(true);
+    expect(app.undoDeletion).not.toBeNull();
+    root.remove();
+  });
+
+  it('selects and deletes text annotations and confirms photo draft discard', () => {
+    const project = createProject('Photo draft');
+    const room = project.buildings[0].floors[0].rooms[0];
+    const photo = {
+      id: 'photo-draft', title: 'Wall', notes: '', dataUrl: 'data:image/jpeg;base64,AAAA', mimeType: 'image/jpeg' as const,
+      width: 1200, height: 800, sizeBytes: 4, capturedAt: new Date().toISOString(),
+      annotations: [
+        { id: 'shape', type: 'rectangle' as const, x: 0.1, y: 0.2, endX: 0.8, endY: 0.7, color: '#e85d3f' },
+        { id: 'text', type: 'text' as const, x: 0.3, y: 0.4, text: 'Existing label', color: '#e85d3f' },
+      ],
+    };
+    room.photos.push(photo);
+    const repository = new LocalStorageProjectRepository(localStorage);
+    repository.save(project);
+    const root = document.createElement('div');
+    const app = new SiteMeasureApp(root) as unknown as {
+      showPhotoDialog(project: ReturnType<typeof createProject>, room: ReturnType<typeof createRoom>, photo: ProjectPhoto): void;
+    };
+    const dialog = root.querySelector<HTMLDialogElement>('.app-dialog')!;
+    dialog.showModal = () => dialog.setAttribute('open', '');
+    dialog.close = () => { dialog.removeAttribute('open'); dialog.dispatchEvent(new Event('close')); };
+
+    app.showPhotoDialog(project, room, photo);
+    expect(dialog.querySelector('[data-photo-tool="arrow"]')?.getAttribute('aria-pressed')).toBe('true');
+    const annotationSelect = dialog.querySelector<HTMLSelectElement>('[aria-label="Photo annotation"]')!;
+    expect(annotationSelect.options).toHaveLength(2);
+    annotationSelect.value = 'text';
+    annotationSelect.dispatchEvent(new Event('change'));
+    [...dialog.querySelectorAll('button')].find((item) => item.textContent === 'Delete selected annotation')!.click();
+    expect(photo.annotations.map((annotation) => annotation.id)).toEqual(['shape']);
+
+    dialog.querySelector<HTMLTextAreaElement>('[aria-label="Photo notes"]')!.value = 'Unsaved note';
+    [...dialog.querySelectorAll('button')].find((item) => item.textContent === 'Close')!.click();
+    expect(dialog.querySelector('#dialog-title')?.textContent).toBe('Discard photo edits?');
+    [...dialog.querySelectorAll('button')].find((item) => item.textContent === 'Discard changes')!.click();
+    expect(room.photos[0].annotations).toHaveLength(2);
+    expect(room.photos[0].notes).toBe('');
+    expect(repository.get(project.id)?.buildings[0].floors[0].rooms[0].photos[0].annotations).toHaveLength(2);
+    root.remove();
+  });
+
   it('round-trips a validated project', () => {
     const project = createProject('River & Oak / 12');
     project.buildings[0].floors[0].rooms[0].objects.push({ id: 'socket', name: 'Socket', layer: 'technician', widthMeters: 0.1, depthMeters: 0.1, heightMeters: 0.1, elevationMeters: 0.7, rotationRadians: Math.PI / 2 });
-    const restored = parseProjectFile(serializeProject(project)).project;
+    const projectFile = parseProjectFile(serializeProject(project));
+    const restored = projectFile.project;
 
     expect(restored).toEqual(project);
+    expect(projectFile.applicationVersion).toBe(__APP_VERSION__);
     expect(projectFilename(project)).toBe('river-oak-12.sitemeasure.json');
+  });
+
+  it('round-trips a multi-project backup and rejects corrupt backup content', () => {
+    const first = createProject('First backup project');
+    const second = createProject('Second backup project');
+    const serialized = serializeBackup([first, second]);
+    const backup = parseBackupFile(serialized);
+    expect(backup.projects).toEqual([first, second]);
+    expect(backup.applicationVersion).toBe(__APP_VERSION__);
+    expect(() => parseBackupFile('{bad json')).toThrow(ProjectValidationError);
+    expect(() => parseBackupFile(JSON.stringify({
+      format: 'sitemeasure-backup', formatVersion: 1, exportedAt: new Date().toISOString(), applicationVersion: '1.0.0', projects: [first, first],
+    }))).toThrow(/duplicate project IDs/);
+  });
+
+  it('exports current projects before replacing them from a backup preview', () => {
+    localStorage.clear();
+    const existing = createProject('Current local project');
+    const incoming = createProject('Restored project');
+    const repository = new LocalStorageProjectRepository(localStorage);
+    repository.save(existing);
+    const root = document.createElement('div');
+    const app = new SiteMeasureApp(root) as unknown as {
+      showBackupPreview(backup: ReturnType<typeof parseBackupFile>): void;
+      downloadText(text: string, filename: string, mimeType: string): void;
+    };
+    const dialog = root.querySelector<HTMLDialogElement>('.app-dialog')!;
+    dialog.showModal = () => dialog.setAttribute('open', '');
+    dialog.close = () => dialog.removeAttribute('open');
+    const downloads: string[] = [];
+    app.downloadText = (text) => downloads.push(text);
+
+    app.showBackupPreview(parseBackupFile(serializeBackup([incoming])));
+    expect(dialog.textContent).toContain('Restored project');
+    expect(dialog.textContent).toContain('Projects on this device');
+    [...dialog.querySelectorAll('button')].find((item) => item.textContent === 'Download current backup & replace')!.click();
+
+    expect(parseBackupFile(downloads[0]).projects.map((project) => project.id)).toEqual([existing.id]);
+    expect(repository.list().map((project) => project.id)).toEqual([incoming.id]);
+    expect(dialog.open).toBe(false);
+    root.remove();
+  });
+
+  it('shows the local replacement target and copy consequence in an import preview', () => {
+    const local = createProject('Existing local job');
+    const incoming = structuredClone(local);
+    incoming.name = 'Incoming job';
+    incoming.address = '12 Example Street';
+    incoming.buildings[0].floors.push({ id: 'preview-floor', name: 'Upper floor', level: 1, rooms: [createRoom('Study')] });
+    const repository = new LocalStorageProjectRepository(localStorage);
+    repository.save(local);
+    const root = document.createElement('div');
+    const app = new SiteMeasureApp(root) as unknown as {
+      showImportPreview(project: ReturnType<typeof createProject>): void;
+    };
+    const dialog = root.querySelector<HTMLDialogElement>('.app-dialog')!;
+    dialog.showModal = () => dialog.setAttribute('open', '');
+    dialog.close = () => dialog.removeAttribute('open');
+
+    app.showImportPreview(incoming);
+
+    expect(dialog.textContent).toContain('12 Example Street');
+    expect(dialog.textContent).toContain('Local project affected');
+    expect(dialog.textContent).toContain('Existing local job');
+    expect(dialog.textContent).toContain('Replace overwrites the local project shown above');
+    expect([...dialog.querySelectorAll('button')].map((item) => item.textContent)).toContain('Import as copy (keep both)');
+    expect([...dialog.querySelectorAll('button')].some((item) => item.textContent === 'Replace local copy: Existing local job')).toBe(true);
+    root.remove();
+  });
+
+  it('shows target identity and device name in measurement history', () => {
+    const project = createProject('History context');
+    const room = project.buildings[0].floors[0].rooms[0];
+    room.objects.push({ id: 'cabinet', name: 'Cabinet', widthMeters: 1, depthMeters: 0.5, heightMeters: 1 });
+    room.measurements.push({ id: 'measure', targetType: 'other', targetId: 'cabinet', valueMeters: 1.2, capturedAt: new Date().toISOString(), source: 'bluetooth', deviceName: 'Meter A' });
+    new LocalStorageProjectRepository(localStorage).save(project);
+    const root = document.createElement('div');
+    const app = new SiteMeasureApp(root) as unknown as {
+      openProject(id: string): void;
+      setView(view: 'measure'): void;
+    };
+    app.openProject(project.id);
+    app.setView('measure');
+
+    const row = root.querySelector('.measurement-row')!;
+    expect(row.textContent).toContain('Cabinet');
+    expect(row.textContent).toContain('Meter A');
+    expect(row.textContent).toContain(room.name);
+    root.remove();
   });
 
   it('rejects the wrong format and version', () => {

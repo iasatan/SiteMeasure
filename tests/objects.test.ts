@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { ObjectLibrary } from '../src/data/object-library';
 import { applyPartChange, cloneParts, createObjectDefinition, OBJECT_PRESETS, ObjectValidationError, parseObjectFile, partBounds, scaleParts, serializeObjects, validateParts } from '../src/domain/furniture';
 import { buildPartsGroup } from '../src/objects/object-preview';
+import { ObjectsPage } from '../src/objects/objects-page';
 
 function memoryStorage(): Storage {
   const data = new Map<string, string>();
@@ -46,6 +47,74 @@ describe('object library', () => {
     for (const label of ['Electrical wiring', 'Socket', 'Pipe', 'Faucet']) {
       expect(OBJECT_PRESETS.find((preset) => preset.label === label)?.layer).toBe('technician');
     }
+  });
+});
+
+describe('object library actions', () => {
+  it('confirms same-name replacement before saving the object draft', () => {
+    const storage = memoryStorage();
+    const library = new ObjectLibrary(storage);
+    const existing = createObjectDefinition('New object', OBJECT_PRESETS[0].build());
+    library.save(existing);
+    let confirmAction: (() => void) | undefined;
+    const host = {
+      layer: () => 'designer' as const,
+      projects: () => [],
+      rooms: () => [],
+      insert: vi.fn(),
+      openPlan: vi.fn(),
+      download: vi.fn(),
+      toast: vi.fn(),
+      confirm: vi.fn((_message: string, action: () => void) => { confirmAction = action; }),
+    };
+    const page = new ObjectsPage(library, host);
+    const main = document.createElement('main');
+    page.render(main);
+    [...main.querySelectorAll('button')].find((item) => item.textContent === 'Save by name')!.click();
+
+    expect(host.confirm).toHaveBeenCalledWith('Replace the saved object "New object"?', expect.any(Function));
+    expect(library.list()).toHaveLength(1);
+    confirmAction!();
+    expect(library.list()).toHaveLength(1);
+    expect(library.list()[0].id).not.toBe(existing.id);
+  });
+
+  it('reports object deletion storage errors in the page and toast', () => {
+    const baseStorage = memoryStorage();
+    const existing = createObjectDefinition('Cabinet', OBJECT_PRESETS[0].build());
+    new ObjectLibrary(baseStorage).save(existing);
+    let failWrites = false;
+    const storage = new Proxy(baseStorage, {
+      get(target, property) {
+        if (property === 'setItem') return (key: string, value: string) => {
+          if (failWrites) throw new DOMException('Quota reached', 'QuotaExceededError');
+          target.setItem(key, value);
+        };
+        const value = Reflect.get(target, property, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const toast = vi.fn();
+    const host = {
+      layer: () => 'designer' as const,
+      projects: () => [],
+      rooms: () => [],
+      insert: vi.fn(),
+      openPlan: vi.fn(),
+      download: vi.fn(),
+      toast,
+      confirm: vi.fn(),
+    };
+    const page = new ObjectsPage(new ObjectLibrary(storage), host);
+    const main = document.createElement('main');
+    page.render(main);
+    failWrites = true;
+    const row = main.querySelector('.object-row')!;
+    [...row.querySelectorAll('button')].find((item) => item.textContent === 'Delete')!.click();
+
+    expect(toast).toHaveBeenCalledWith('Device storage is full; the object could not be saved.');
+    expect(main.querySelector('[role="alert"]')?.textContent).toBe('Device storage is full; the object could not be saved.');
+    expect(new ObjectLibrary(baseStorage).list()).toHaveLength(1);
   });
 });
 

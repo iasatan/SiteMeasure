@@ -27,6 +27,7 @@ export interface ObjectsPageHost {
   openPlan(projectId: string, roomId: string): void;
   download(text: string, filename: string, mimeType: string): void;
   toast(message: string): void;
+  confirm(message: string, onConfirm: () => void): void;
 }
 
 type DimensionKey = 'xMeters' | 'yMeters' | 'zMeters' | 'widthMeters' | 'heightMeters' | 'depthMeters';
@@ -149,7 +150,13 @@ export class ObjectsPage {
       row.append(insert);
       row.append(btn('Export', 'button quiet compact', () => this.exportObjects([object])));
       row.append(btn('Delete', 'button quiet compact', () => {
-        this.library.delete(object.id);
+        try {
+          this.library.delete(object.id);
+          this.message = '';
+        } catch (error) {
+          this.message = error instanceof Error ? error.message : 'The object could not be deleted.';
+          this.host.toast(this.message);
+        }
         this.rerender();
       }));
       section.append(row);
@@ -366,14 +373,17 @@ export class ObjectsPage {
     return wrap;
   }
 
-  private saveDraft(): void {
+  private saveDraft(confirmed = false): void {
     if (!this.draft.name.trim()) {
       this.message = 'Enter a name for the object.';
       this.rerender();
       return;
     }
     const existing = this.library.list().find((item) => item.name.toLowerCase() === this.draft.name.trim().toLowerCase() && item.id !== this.draft.id);
-    if (existing && !window.confirm(`Replace the saved object "${existing.name}"?`)) return;
+    if (existing && !confirmed) {
+      this.host.confirm(`Replace the saved object "${existing.name}"?`, () => this.saveDraft(true));
+      return;
+    }
     try {
       this.draft = this.library.save({ ...this.draft, name: this.draft.name.trim() });
       this.message = `Saved "${this.draft.name}".`;

@@ -120,6 +120,15 @@ describe('project reports', () => {
     expect(printableReport(project)).toContain('&lt;script&gt;');
   });
 
+  it('labels report area and volume using the project units', () => {
+    const project = createProject('Imperial report');
+    project.preferredUnits = 'imperial';
+    const report = printableReport(project);
+    expect(report).toContain('ft²');
+    expect(report).toContain('ft³');
+    expect(report).not.toContain(' m²');
+  });
+
   it('creates a standalone SVG for a room', () => {
     const project = createProject('Plan');
     const room = createRoom('Kitchen');

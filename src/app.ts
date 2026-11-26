@@ -1,11 +1,11 @@
-import { copyImportedProject, projectFilename, readProjectFile, serializeProject } from './data/project-files';
+import { copyImportedProject, projectFilename, readBackupFile, readProjectFile, serializeBackup, serializeProject, type BackupFile } from './data/project-files';
 import { ObjectLibrary } from './data/object-library';
 import { cloneParts, partBounds, type ObjectDefinition } from './domain/furniture';
 import { ObjectsPage } from './objects/objects-page';
 import { LocalStorageProjectRepository, type RepositoryWarning } from './data/local-storage-repository';
 import { createId, createProject, createRoom, DEFAULT_DOOR_HEIGHT_METERS, DEFAULT_WINDOW_HEIGHT_METERS, type EditingLayer, type PhotoAnnotation, type Project, type ProjectPhoto, type ProjectSummary, type Room } from './domain/models';
 import { FloorPlanEditor, type ClearanceSide, type EditorSelection } from './editor/floor-plan-editor';
-import { deriveOpeningSegments, distanceBetween, formatLength, openingArea, polygonIssues, roomArea, roomHeight, roomVolume, wallArea, type OpeningSegmentKey } from './geometry';
+import { deriveOpeningSegments, distanceBetween, formatArea, formatLength, formatVolume, openingArea, polygonIssues, roomArea, roomHeight, roomVolume, wallArea, type OpeningSegmentKey } from './geometry';
 import { BoschLaserMeasureAdapter } from './bluetooth/bosch-laser-measure-adapter';
 import { clearCustomBoschProfile, loadCustomBoschProfile, loadCustomBoschProfileSettings, saveCustomBoschProfile, type BoschPayloadFormat } from './bluetooth/custom-bosch-profile';
 import { DeviceExplorer, loadExtraServices, saveExtraServices } from './bluetooth/device-explorer';
@@ -58,6 +58,7 @@ export class SiteMeasureApp {
     openPlan: (projectId, roomId) => { this.activeRoomId = roomId; this.openProject(projectId); },
     download: (text, filename, mimeType) => this.downloadText(text, filename, mimeType),
     toast: (message) => this.showToast(message),
+    confirm: (message, onConfirm) => this.showConfirmationDialog('Replace saved object?', message, onConfirm),
   });
   private view: PrimaryView = 'projects';
   private layer: EditingLayer = 'builder';
@@ -66,6 +67,8 @@ export class SiteMeasureApp {
   private saveState: SaveState = 'idle';
   private saveTime: string | null = null;
   private saveTimer: number | undefined;
+  private toastHideTimer: number | undefined;
+  private undoTimer: number | undefined;
   private undoDeletion: UndoDeletion | null = null;
   private searchTerm = '';
   private showArchived = false;
@@ -86,7 +89,7 @@ export class SiteMeasureApp {
     }
 
     window.addEventListener('beforeunload', (event) => {
-      if (this.dirty && this.saveState === 'error') {
+      if (this.dirty) {
         event.preventDefault();
       }
     });
@@ -112,6 +115,7 @@ export class SiteMeasureApp {
       </div>
       <dialog class="app-dialog" aria-labelledby="dialog-title"></dialog>
       <input class="visually-hidden" type="file" accept=".sitemeasure.json,application/json" data-import-input />
+      <input class="visually-hidden" type="file" accept=".sitemeasure-backup.json,application/json" data-backup-input />
       <input class="visually-hidden" type="file" accept="image/*" data-photo-library />
       <input class="visually-hidden" type="file" accept="image/*" capture="environment" data-photo-camera />
       <div class="toast" role="status" aria-live="polite" hidden></div>
@@ -128,6 +132,9 @@ export class SiteMeasureApp {
     });
     this.root.querySelector<HTMLInputElement>('[data-import-input]')?.addEventListener('change', (event) => {
       void this.handleImport((event.currentTarget as HTMLInputElement).files?.[0]);
+    });
+    this.root.querySelector<HTMLInputElement>('[data-backup-input]')?.addEventListener('change', (event) => {
+      void this.handleBackupImport((event.currentTarget as HTMLInputElement).files?.[0]);
     });
     for (const input of this.root.querySelectorAll<HTMLInputElement>('[data-photo-library], [data-photo-camera]')) {
       input.addEventListener('change', () => {
@@ -275,7 +282,7 @@ export class SiteMeasureApp {
     const topActions = element('div', 'workspace-actions');
     if (this.layer === 'builder') {
       topActions.append(button('New room', 'button quiet compact', () => this.addRoom(project)));
-      topActions.append(button('Floor', 'button quiet compact', () => this.addFloor(project)));
+      topActions.append(button('New Floor', 'button quiet compact', () => this.addFloor(project)));
     }
     topActions.append(button('3D view', 'button primary compact', () => { void this.showRoomViewer(project, this.activeEditor?.getRoom() ?? active); }));
     topActions.append(button('Export', 'button quiet compact', () => this.exportProject(project)));
@@ -453,9 +460,9 @@ export class SiteMeasureApp {
     } else {
       const issues = polygonIssues(room.points).filter(() => room.points.length > 0);
       const metrics = element('div', 'room-calculations');
-      metrics.append(calculation(`${roomArea(room).toFixed(2)} m²`, 'Area'));
-      metrics.append(calculation(`${roomVolume(room).toFixed(2)} m³`, `Volume at ${roomHeight(room).toFixed(2)} m`));
-      metrics.append(calculation(`${wallArea(room.walls, roomHeight(room), openingArea(room.walls, room)).toFixed(2)} m²`, 'Net wall area'));
+      metrics.append(calculation(formatArea(roomArea(room), project.preferredUnits), 'Area'));
+      metrics.append(calculation(formatVolume(roomVolume(room), project.preferredUnits), `Volume at ${formatLength(roomHeight(room), project.preferredUnits)}`));
+      metrics.append(calculation(formatArea(wallArea(room.walls, roomHeight(room), openingArea(room.walls, room)), project.preferredUnits), 'Net wall area'));
       inspector.append(metrics);
       if (this.layer === 'builder') inspector.append(this.roomHeightField(project, room));
       else inspector.append(this.objectsSection(project, room));
@@ -991,7 +998,8 @@ export class SiteMeasureApp {
   }
 
   private addRoom(project: Project): void {
-    const floor = project.buildings[0]?.floors[0];
+    const floors = project.buildings.flatMap((building) => building.floors);
+    const floor = floors.find((candidate) => candidate.rooms.some((room) => room.id === this.activeRoomId)) ?? floors[0];
     if (!floor) return;
     const room = createRoom(`Room ${floor.rooms.length + 1}`);
     floor.rooms.push(room);
@@ -1226,16 +1234,18 @@ export class SiteMeasureApp {
       main.append(page);
       return;
     }
-    const measurements = project.buildings.flatMap((building) => building.floors.flatMap((floor) => floor.rooms.flatMap((room) => room.measurements.map((measurement) => ({ measurement, room })))))
+    const measurements = project.buildings.flatMap((building) => building.floors.flatMap((floor) => floor.rooms.flatMap((room) => room.measurements.map((measurement) => ({ measurement, room, building, floor })))))
       .sort((left, right) => right.measurement.capturedAt.localeCompare(left.measurement.capturedAt));
     const list = element('div', 'measurement-list');
     if (!measurements.length) {
       list.append(element('p', 'measurements-empty', 'No measurements yet. Select a wall in Plan and choose Measure.'));
     }
-    for (const { measurement, room } of measurements) {
+    for (const { measurement, room, building, floor } of measurements) {
       const row = element('article', 'measurement-row');
       row.append(element('strong', 'measurement-value', formatLength(measurement.valueMeters, project.preferredUnits)));
-      row.append(element('span', '', `${room.name} · ${measurement.source} · ${formatDate(measurement.capturedAt)}`));
+      const target = measurementTargetLabel(room, measurement);
+      const device = measurement.deviceName ? ` · ${measurement.deviceName}` : '';
+      row.append(element('span', '', `${building.name} / ${floor.name} / ${room.name} · ${target} · ${measurement.source}${device} · ${formatDate(measurement.capturedAt)}`));
       list.append(row);
     }
     const active = this.activeRoom(project);
@@ -1294,6 +1304,14 @@ export class SiteMeasureApp {
     const actions = element('section', 'settings-section');
     actions.append(element('h2', '', 'Project files and reports'));
     actions.append(button('Import project', 'button primary stretch', () => this.openImportPicker()));
+    actions.append(button('Export full backup', 'button quiet stretch', () => {
+      const projects = this.repository.list().flatMap((summary) => {
+        const project = this.repository.get(summary.id);
+        return project ? [project] : [];
+      });
+      this.downloadText(serializeBackup(projects), `sitemeasure-backup-${new Date().toISOString().slice(0, 10)}.sitemeasure-backup.json`, 'application/json');
+    }));
+    actions.append(button('Restore full backup', 'button quiet stretch', () => this.openBackupPicker()));
     const current = this.selectedProject();
     if (current) {
       const room = this.activeRoom(current);
@@ -1474,6 +1492,7 @@ export class SiteMeasureApp {
 
   private showPhotoDialog(project: Project, room: Room, photo: ProjectPhoto): void {
     const dialog = this.dialog();
+    const originalPhoto = structuredClone(photo);
     const content = element('div', 'dialog-content photo-editor');
     content.append(element('p', 'eyebrow', 'Photo annotation'), element('h2', 'dialog-title', photo.title));
     const titleField = document.createElement('input');
@@ -1494,7 +1513,7 @@ export class SiteMeasureApp {
     image.draggable = false;
     stage.append(image);
     let tool: PhotoAnnotation['type'] = 'arrow';
-    let selectedId = photo.annotations.slice().reverse().find((annotation) => annotation.type !== 'text')?.id ?? '';
+    let selectedId = photo.annotations.at(-1)?.id ?? '';
     const updateAnnotations = () => {
       const rendered = renderPhotoAnnotations(image, photo.annotations, project.preferredUnits, selectedId);
       const current = stage.querySelector('svg');
@@ -1512,13 +1531,15 @@ export class SiteMeasureApp {
     dimensionInput.setAttribute('aria-label', `Dimension in ${project.preferredUnits === 'imperial' ? 'feet' : 'meters'}`);
     const dimensionStatus = element('p', 'bluetooth-detail');
     const measurementSection = element('section', 'photo-measurement');
-    const selectedAnnotation = () => photo.annotations.find((annotation) => annotation.id === selectedId && annotation.type !== 'text');
+    const selectedAnnotation = () => photo.annotations.find((annotation) => annotation.id === selectedId);
     const dimensionKey = () => dimensionSelect.value as 'lengthMeters' | 'widthMeters' | 'heightMeters';
     const refreshDimension = () => {
       const annotation = selectedAnnotation();
       const previousDimension = dimensionSelect.value;
       dimensionSelect.replaceChildren();
-      const dimensions = annotation?.type === 'arrow' ? [['lengthMeters', 'Length']] : annotation ? [['widthMeters', 'Width'], ['heightMeters', 'Height']] : [];
+      const dimensions: Array<[string, string]> = [];
+      if (annotation?.type === 'arrow') dimensions.push(['lengthMeters', 'Length']);
+      else if (annotation && annotation.type !== 'text') dimensions.push(['widthMeters', 'Width'], ['heightMeters', 'Height']);
       for (const [value, label] of dimensions) {
         const option = document.createElement('option');
         option.value = value;
@@ -1526,7 +1547,7 @@ export class SiteMeasureApp {
         dimensionSelect.append(option);
       }
       if (dimensions.some(([value]) => value === previousDimension)) dimensionSelect.value = previousDimension;
-      const value = annotation?.[dimensionKey()];
+      const value = annotation && annotation.type !== 'text' ? annotation[dimensionKey()] : undefined;
       const factor = project.preferredUnits === 'imperial' ? 3.280839895 : 1;
       dimensionInput.value = value === undefined ? '' : (value * factor).toFixed(3);
       dimensionInput.disabled = !annotation;
@@ -1536,7 +1557,6 @@ export class SiteMeasureApp {
     const refreshSelection = () => {
       annotationSelect.replaceChildren();
       for (const [index, annotation] of photo.annotations.entries()) {
-        if (annotation.type === 'text') continue;
         const option = document.createElement('option');
         option.value = annotation.id;
         option.textContent = `${annotation.type[0].toUpperCase()}${annotation.type.slice(1)} ${index + 1}`;
@@ -1545,11 +1565,12 @@ export class SiteMeasureApp {
       if (!photo.annotations.some((annotation) => annotation.id === selectedId && annotation.type !== 'text')) selectedId = annotationSelect.options[0]?.value ?? '';
       annotationSelect.value = selectedId;
       annotationSelect.disabled = !selectedId;
+      deleteSelected.disabled = !selectedId;
       refreshDimension();
     };
     const setDimension = (meters: number): boolean => {
       const annotation = selectedAnnotation();
-      if (!annotation || !Number.isFinite(meters) || meters < 0.001 || meters > 100000) {
+      if (!annotation || annotation.type === 'text' || !Number.isFinite(meters) || meters < 0.001 || meters > 100000) {
         dimensionStatus.textContent = annotation ? 'Enter a dimension between 0.001 and 100000 meters.' : 'Select an arrow, rectangle, or circle first.';
         return false;
       }
@@ -1561,7 +1582,7 @@ export class SiteMeasureApp {
     const refreshPhotoBluetooth = () => {
       const panel = measurementSection.querySelector<HTMLElement>('[data-bluetooth-panel]');
       const annotation = selectedAnnotation();
-      const target = annotation ? `${annotation.type} ${dimensionSelect.selectedOptions[0]?.textContent?.toLowerCase()}` : 'Select an annotation';
+      const target = annotation && annotation.type !== 'text' ? `${annotation.type} ${dimensionSelect.selectedOptions[0]?.textContent?.toLowerCase()}` : 'Select a measured annotation';
       const next = this.bluetoothPanel(project, room, undefined, undefined, {
         label: target,
         apply: (captureId) => {
@@ -1587,7 +1608,11 @@ export class SiteMeasureApp {
       const end = normalizedPoint(image, event.clientX, event.clientY);
       if (tool === 'text') {
         const text = textInput.value.trim();
-        if (text) photo.annotations.push({ id: createId(), type: 'text', x: end.x, y: end.y, text, color: '#e85d3f' });
+        if (text) {
+          const annotation = { id: createId(), type: 'text' as const, x: end.x, y: end.y, text, color: '#e85d3f' };
+          photo.annotations.push(annotation);
+          selectedId = annotation.id;
+        }
       } else {
         const annotation: PhotoAnnotation = { id: createId(), type: tool, x: start.x, y: start.y, endX: end.x, endY: end.y, color: '#e85d3f' };
         photo.annotations.push(annotation);
@@ -1600,12 +1625,28 @@ export class SiteMeasureApp {
     });
     const tools = element('div', 'annotation-tools');
     for (const annotationTool of ['arrow', 'rectangle', 'circle', 'text'] as const) {
-      tools.append(button(annotationTool[0].toUpperCase() + annotationTool.slice(1), 'button quiet compact', () => {
+      const toolButton = button(annotationTool[0].toUpperCase() + annotationTool.slice(1), `button quiet compact${tool === annotationTool ? ' is-active' : ''}`, () => {
         tool = annotationTool;
-        tools.querySelectorAll('button').forEach((item) => item.classList.toggle('is-active', item.textContent?.toLowerCase() === tool));
-      }));
+        tools.querySelectorAll<HTMLButtonElement>('[data-photo-tool]').forEach((item) => {
+          const active = item.dataset.photoTool === tool;
+          item.classList.toggle('is-active', active);
+          item.setAttribute('aria-pressed', String(active));
+        });
+      });
+      toolButton.dataset.photoTool = annotationTool;
+      toolButton.setAttribute('aria-pressed', String(tool === annotationTool));
+      tools.append(toolButton);
     }
     tools.append(button('Undo annotation', 'button quiet compact', () => { photo.annotations.pop(); refreshSelection(); updateAnnotations(); refreshPhotoBluetooth(); }));
+    const deleteSelected = button('Delete selected annotation', 'button quiet compact', () => {
+      photo.annotations = photo.annotations.filter((annotation) => annotation.id !== selectedId);
+      selectedId = '';
+      refreshSelection();
+      updateAnnotations();
+      refreshPhotoBluetooth();
+    });
+    deleteSelected.disabled = !selectedId;
+    tools.append(deleteSelected);
     const annotationField = element('label', 'field');
     annotationField.append(element('span', 'field-label', 'Annotation'), annotationSelect);
     const dimensionField = element('label', 'field');
@@ -1621,6 +1662,38 @@ export class SiteMeasureApp {
     refreshPhotoBluetooth();
     this.photoMeasurement = { content, refresh: refreshPhotoBluetooth };
     const actions = element('div', 'dialog-actions');
+    const closeEditor = () => {
+      const changed = JSON.stringify(photo) !== JSON.stringify(originalPhoto)
+        || titleField.value !== originalPhoto.title
+        || notes.value !== originalPhoto.notes;
+      if (!changed) {
+        dialog.close();
+        return;
+      }
+      const confirmation = element('div', 'dialog-content');
+      confirmation.append(element('h2', 'dialog-title', 'Discard photo edits?'), element('p', '', 'Your annotation and text changes have not been saved.'));
+      const choices = element('div', 'dialog-actions');
+      choices.append(button('Keep editing', 'button quiet', () => {
+        dialog.replaceChildren(content);
+        this.openDialog(dialog);
+      }));
+      choices.append(button('Discard changes', 'button danger', () => {
+        const index = room.photos.findIndex((candidate) => candidate.id === originalPhoto.id);
+        if (index >= 0) room.photos[index] = originalPhoto;
+        dialog.close();
+        this.render();
+      }));
+      confirmation.append(choices);
+      dialog.replaceChildren(confirmation);
+      this.openDialog(dialog);
+    };
+    const cancelDialog = (event: Event) => {
+      event.preventDefault();
+      closeEditor();
+    };
+    dialog.addEventListener('cancel', cancelDialog);
+    dialog.addEventListener('close', () => dialog.removeEventListener('cancel', cancelDialog), { once: true });
+    actions.append(button('Close', 'button quiet', closeEditor));
     actions.append(button('Delete photo', 'button danger', () => {
       room.photos = room.photos.filter((candidate) => candidate.id !== photo.id);
       project.modifiedAt = new Date().toISOString();
@@ -1683,10 +1756,14 @@ export class SiteMeasureApp {
     const actions = element('div', 'manage-actions');
     actions.append(button('Rename and edit', 'button quiet stretch', () => this.showProjectDialog(project)));
     actions.append(button('Duplicate', 'button quiet stretch', () => {
-      const copy = this.repository.duplicate(project.id);
-      dialog.close();
-      this.showToast(`Created ${copy.name}`);
-      this.render();
+      try {
+        const copy = this.repository.duplicate(project.id);
+        dialog.close();
+        this.showToast(`Created ${copy.name}`);
+        this.render();
+      } catch (error) {
+        this.reportPersistenceError(error);
+      }
     }));
     actions.append(button(project.status === 'archived' ? 'Restore to active' : 'Archive', 'button quiet stretch', () => {
       project.status = project.status === 'archived' ? 'active' : 'archived';
@@ -1704,6 +1781,21 @@ export class SiteMeasureApp {
     this.openDialog(dialog);
   }
 
+  private showConfirmationDialog(title: string, message: string, onConfirm: () => void): void {
+    const dialog = this.dialog();
+    const content = element('div', 'dialog-content');
+    content.append(element('h2', 'dialog-title', title), element('p', '', message));
+    const actions = element('div', 'dialog-actions');
+    actions.append(button('Cancel', 'button quiet', () => dialog.close()));
+    actions.append(button('Replace', 'button danger', () => {
+      dialog.close();
+      onConfirm();
+    }));
+    content.append(actions);
+    dialog.replaceChildren(content);
+    this.openDialog(dialog);
+  }
+
   private confirmDelete(project: Project): void {
     const dialog = this.dialog();
     const content = element('div', 'dialog-content');
@@ -1711,16 +1803,21 @@ export class SiteMeasureApp {
     const actions = element('div', 'dialog-actions');
     actions.append(button('Cancel', 'button quiet', () => dialog.close()));
     actions.append(button('Delete', 'button danger', () => {
-      this.repository.delete(project.id);
+      try {
+        this.repository.delete(project.id);
+      } catch (error) {
+        this.reportPersistenceError(error);
+        return;
+      }
       this.undoDeletion = { project, expiresAt: Date.now() + 30_000 };
+      window.clearTimeout(this.undoTimer);
+      this.undoTimer = window.setTimeout(() => {
+        this.undoDeletion = null;
+        this.root.querySelector('.toast-action')?.remove();
+      }, 30_000);
       if (this.selectedProjectId === project.id) this.selectedProjectId = null;
       dialog.close();
-      this.showToast('Project deleted', 'Undo', () => {
-        if (!this.undoDeletion || this.undoDeletion.expiresAt < Date.now()) return;
-        this.repository.save(this.undoDeletion.project);
-        this.undoDeletion = null;
-        this.render();
-      });
+      this.showToast('Project deleted', 'Undo', () => this.undoProjectDeletion());
       this.render();
     }));
     content.append(actions);
@@ -1742,6 +1839,70 @@ export class SiteMeasureApp {
     }
   }
 
+  private async handleBackupImport(file: File | undefined): Promise<void> {
+    if (!file) return;
+    try {
+      this.showBackupPreview(await readBackupFile(file));
+    } catch (error) {
+      this.debugLog?.log('handled.error', error);
+      this.showToast(error instanceof Error ? error.message : 'The backup could not be restored.');
+    } finally {
+      const input = this.root.querySelector<HTMLInputElement>('[data-backup-input]');
+      if (input) input.value = '';
+    }
+  }
+
+  private showBackupPreview(backup: BackupFile): void {
+    const dialog = this.dialog();
+    const currentProjects = this.repository.list().flatMap((summary) => {
+      const project = this.repository.get(summary.id);
+      return project ? [project] : [];
+    });
+    const content = element('div', 'dialog-content');
+    content.append(element('p', 'eyebrow', 'Review full backup'), element('h2', 'dialog-title', 'Restore local projects'));
+    const preview = element('dl', 'import-preview');
+    appendDefinition(preview, 'Backup exported', formatDate(backup.exportedAt));
+    appendDefinition(preview, 'Projects in backup', String(backup.projects.length));
+    appendDefinition(preview, 'Projects on this device', String(currentProjects.length));
+    content.append(preview);
+    const names = element('ul', 'backup-project-list');
+    backup.projects.forEach((project) => names.append(element('li', '', `${project.name} · ${totalRooms(project)} rooms · modified ${formatDate(project.modifiedAt)}`)));
+    content.append(names);
+    content.append(element('p', 'storage-warning', currentProjects.length
+      ? 'This replaces every local project. A download of your current projects will be requested first.'
+      : 'This replaces the local project list on this device.'));
+    const actions = element('div', 'dialog-actions stacked');
+    actions.append(button(currentProjects.length ? 'Download current backup & replace' : 'Restore projects', 'button danger stretch', () => {
+      try {
+        if (currentProjects.length) {
+          this.downloadText(serializeBackup(currentProjects), `sitemeasure-before-restore-${new Date().toISOString().slice(0, 10)}.sitemeasure-backup.json`, 'application/json');
+        }
+        this.repository.replaceAll(backup.projects);
+        this.undoDeletion = null;
+        window.clearTimeout(this.undoTimer);
+        this.undoTimer = undefined;
+        this.selectedProjectId = null;
+        this.activeRoomId = null;
+        this.dirty = false;
+        this.saveState = 'saved';
+        this.saveTime = new Date().toISOString();
+        dialog.close();
+        this.setView('projects');
+        this.showToast('Backup restored');
+      } catch (error) {
+        this.reportPersistenceError(error);
+      }
+    }));
+    actions.append(button('Cancel', 'button quiet stretch', () => dialog.close()));
+    content.append(actions);
+    dialog.replaceChildren(content);
+    this.openDialog(dialog);
+  }
+
+  private openBackupPicker(): void {
+    this.root.querySelector<HTMLInputElement>('[data-backup-input]')?.click();
+  }
+
   private showImportPreview(project: Project): void {
     const dialog = this.dialog();
     const existing = this.repository.get(project.id);
@@ -1750,19 +1911,27 @@ export class SiteMeasureApp {
     const preview = element('dl', 'import-preview');
     appendDefinition(preview, 'Project number', project.projectNumber || 'Not set');
     appendDefinition(preview, 'Customer', project.customer || 'Not set');
+    appendDefinition(preview, 'Address', project.address || 'Not set');
+    appendDefinition(preview, 'Modified', formatDate(project.modifiedAt));
+    appendDefinition(preview, 'Buildings', String(project.buildings.length));
+    appendDefinition(preview, 'Floors', String(totalFloors(project)));
     appendDefinition(preview, 'Rooms', String(totalRooms(project)));
-    appendDefinition(preview, 'Conflict', existing ? 'A local project has the same ID' : 'No matching local project');
+    appendDefinition(preview, 'Photos', String(totalPhotos(project)));
+    appendDefinition(preview, 'Local project affected', existing ? `${existing.name} · modified ${formatDate(existing.modifiedAt)}` : 'None');
     content.append(preview);
+    content.append(element('p', existing ? 'storage-warning' : 'field-hint', existing
+      ? 'Replace overwrites the local project shown above. Import as copy keeps both projects.'
+      : 'Import adds this project to this device. Import as copy creates a separate copy.'));
     const actions = element('div', 'dialog-actions stacked');
     if (existing) {
-      actions.append(button('Replace local project', 'button danger stretch', () => {
+      actions.append(button(`Replace local copy: ${existing.name}`, 'button danger stretch', () => {
         if (this.save(project)) {
           dialog.close();
           this.openProject(project.id);
         }
       }));
     }
-    actions.append(button('Import as copy', 'button primary stretch', () => {
+    actions.append(button('Import as copy (keep both)', 'button primary stretch', () => {
       const copy = copyImportedProject(project);
       if (this.save(copy)) {
         dialog.close();
@@ -2012,6 +2181,8 @@ export class SiteMeasureApp {
   }
 
   private save(project: Project): boolean {
+    window.clearTimeout(this.saveTimer);
+    this.saveTimer = undefined;
     try {
       this.repository.save(project);
       this.dirty = false;
@@ -2020,14 +2191,19 @@ export class SiteMeasureApp {
       this.renderSaveIndicator();
       return true;
     } catch (error) {
-      this.debugLog?.log('handled.error', error);
       this.dirty = true;
       this.saveState = 'error';
-      this.notice = error instanceof Error ? error.message : 'The project could not be saved.';
       this.renderSaveIndicator();
-      this.renderNotice();
+      this.reportPersistenceError(error);
       return false;
     }
+  }
+
+  private reportPersistenceError(error: unknown): void {
+    this.debugLog?.log('handled.error', error);
+    this.notice = error instanceof Error ? error.message : 'The project could not be saved.';
+    this.renderNotice();
+    this.showToast(this.notice);
   }
 
   private renderSaveIndicator(): void {
@@ -2054,13 +2230,30 @@ export class SiteMeasureApp {
   private showToast(message: string, actionLabel?: string, action?: () => void): void {
     const toast = this.root.querySelector<HTMLElement>('.toast');
     if (!toast) return;
+    window.clearTimeout(this.toastHideTimer);
     toast.replaceChildren(element('span', '', message));
     if (actionLabel && action) toast.append(button(actionLabel, 'toast-action', action));
+    if (this.undoDeletion && actionLabel !== 'Undo') {
+      toast.append(button('Undo', 'toast-action', () => this.undoProjectDeletion()));
+    }
     toast.hidden = false;
-    window.setTimeout(() => {
+    this.toastHideTimer = window.setTimeout(() => {
       toast.hidden = true;
-      this.undoDeletion = null;
     }, action ? 30_000 : 4_000);
+  }
+
+  private undoProjectDeletion(): void {
+    const deletion = this.undoDeletion;
+    if (!deletion || deletion.expiresAt < Date.now()) return;
+    try {
+      this.repository.save(deletion.project);
+      this.undoDeletion = null;
+      window.clearTimeout(this.undoTimer);
+      this.undoTimer = undefined;
+      this.render();
+    } catch (error) {
+      this.reportPersistenceError(error);
+    }
   }
 
   private dialog(): HTMLDialogElement {
@@ -2070,6 +2263,11 @@ export class SiteMeasureApp {
   }
 
   private openDialog(dialog: HTMLDialogElement): void {
+    const title = dialog.querySelector<HTMLElement>('.dialog-title');
+    if (title) {
+      title.id = 'dialog-title';
+      dialog.setAttribute('aria-labelledby', title.id);
+    }
     if (!dialog.open) dialog.showModal();
     window.requestAnimationFrame(() => dialog.querySelector<HTMLInputElement>('input')?.focus());
   }
@@ -2113,6 +2311,27 @@ function appendDefinition(list: HTMLDListElement, label: string, value: string):
 
 function totalRooms(project: Project): number {
   return project.buildings.reduce((buildingTotal, building) => buildingTotal + building.floors.reduce((floorTotal, floor) => floorTotal + floor.rooms.length, 0), 0);
+}
+
+function totalFloors(project: Project): number {
+  return project.buildings.reduce((total, building) => total + building.floors.length, 0);
+}
+
+function totalPhotos(project: Project): number {
+  return project.buildings.reduce((buildingTotal, building) => buildingTotal + building.floors.reduce((floorTotal, floor) => floorTotal + floor.rooms.reduce((roomTotal, room) => roomTotal + room.photos.length, 0), 0), 0);
+}
+
+function measurementTargetLabel(room: Room, measurement: Room['measurements'][number]): string {
+  if (measurement.targetType === 'room') return 'Room measurement';
+  if (measurement.targetType === 'wall') {
+    const index = room.walls.findIndex((wall) => wall.id === measurement.targetId);
+    return index >= 0 ? `Wall ${index + 1}` : 'Wall (not found)';
+  }
+  const object = room.objects.find((candidate) => candidate.id === measurement.targetId);
+  if (object) return object.name;
+  if (room.doors.some((opening) => opening.id === measurement.targetId)) return 'Door';
+  if (room.windows.some((opening) => opening.id === measurement.targetId)) return 'Window';
+  return 'Other target';
 }
 
 function formValue(formData: FormData, name: string): string {
