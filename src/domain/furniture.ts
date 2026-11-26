@@ -71,6 +71,8 @@ export function createObjectDefinition(name: string, parts: ObjectPart[] = []): 
   return { id: createId(), name: name.trim() || 'Untitled object', parts: parts.map((part) => ({ ...part })), createdAt: now, modifiedAt: now };
 }
 
+import { OBJECT_PRESETS } from './furniture-templates';
+
 export { OBJECT_PRESETS, type ObjectPreset } from './furniture-templates';
 
 function finite(value: unknown, path: string, min: number, max: number): number {
@@ -256,4 +258,18 @@ export function objectFilename(objects: ObjectDefinition[]): string {
   const base = objects.length === 1 ? objects[0].name : 'objects';
   const safe = base.normalize('NFKD').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'objects';
   return `${safe}.sitemeasure-object.json`;
+}
+
+/** Objects published through pull requests live in /objects and are bundled as templates. */
+const PUBLISHED_OBJECT_FILES = import.meta.glob('../../objects/*.json', { eager: true, query: '?raw', import: 'default' }) as Record<string, string>;
+
+for (const [path, text] of Object.entries(PUBLISHED_OBJECT_FILES)) {
+  try {
+    for (const object of parseObjectFile(text)) {
+      if (OBJECT_PRESETS.some((preset) => preset.label.toLowerCase() === object.name.toLowerCase())) continue;
+      OBJECT_PRESETS.push({ label: object.name, category: 'Published', layer: object.layer ?? 'designer', build: () => cloneParts(object.parts) });
+    }
+  } catch (error) {
+    console.warn(`Skipped published object file ${path}.`, error);
+  }
 }
