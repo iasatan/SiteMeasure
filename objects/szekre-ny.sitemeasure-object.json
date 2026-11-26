@@ -1,0 +1,111 @@
+{
+  "format": "sitemeasure-object",
+  "formatVersion": 1,
+  "exportedAt": "2026-11-26T18:42:52.661Z",
+  "applicationVersion": "0.1.55",
+  "objects": [
+    {
+      "id": "11987c28-6003-494a-bfd4-160844aa5647",
+      "name": "Szekrény",
+      "parts": [
+        {
+          "id": "4db42ad8-73d5-4cca-a00d-407ce1e9b012",
+          "shape": "box",
+          "xMeters": 0,
+          "yMeters": 0,
+          "zMeters": 0,
+          "widthMeters": 0.9,
+          "heightMeters": 2,
+          "depthMeters": 0.02,
+          "color": "#e8e8e4"
+        },
+        {
+          "id": "e7d46f94-a4d6-45c2-a590-c67c6595b9af",
+          "shape": "box",
+          "xMeters": 0.45,
+          "yMeters": 0,
+          "zMeters": 0.3,
+          "widthMeters": 0.02,
+          "heightMeters": 2,
+          "depthMeters": 0.6,
+          "color": "#8c7a6b",
+          "parentId": "4db42ad8-73d5-4cca-a00d-407ce1e9b012"
+        },
+        {
+          "id": "cebc122c-a3dc-462a-a658-019579d106e1",
+          "shape": "box",
+          "xMeters": 0,
+          "yMeters": 1,
+          "zMeters": 0.3,
+          "widthMeters": 0.9,
+          "heightMeters": 0.02,
+          "depthMeters": 0.6,
+          "color": "#8c7a6b",
+          "parentId": "4db42ad8-73d5-4cca-a00d-407ce1e9b012"
+        },
+        {
+          "id": "90ee9adb-1cba-4e8d-8ef4-9e010397875a",
+          "shape": "box",
+          "xMeters": -0.45,
+          "yMeters": 0,
+          "zMeters": 0.3,
+          "widthMeters": 0.02,
+          "heightMeters": 2,
+          "depthMeters": 0.6,
+          "color": "#8c7a6b",
+          "parentId": "4db42ad8-73d5-4cca-a00d-407ce1e9b012"
+        },
+        {
+          "id": "eff5ed67-3ac2-43ff-840b-65592ea5cf04",
+          "shape": "box",
+          "xMeters": 0,
+          "yMeters": 0,
+          "zMeters": 0.3,
+          "widthMeters": 0.9,
+          "heightMeters": 0.02,
+          "depthMeters": 0.6,
+          "color": "#8c7a6b",
+          "parentId": "4db42ad8-73d5-4cca-a00d-407ce1e9b012"
+        },
+        {
+          "id": "397d63a6-0555-466f-a98e-4b283c8e305f",
+          "shape": "box",
+          "xMeters": 0,
+          "yMeters": -1,
+          "zMeters": 0.3,
+          "widthMeters": 0.9,
+          "heightMeters": 0.02,
+          "depthMeters": 0.6,
+          "color": "#8c7a6b",
+          "parentId": "4db42ad8-73d5-4cca-a00d-407ce1e9b012"
+        },
+        {
+          "id": "67acf3a2-b3e2-4174-88be-fa8ffb65a3ab",
+          "shape": "box",
+          "xMeters": 0,
+          "yMeters": -0.5,
+          "zMeters": 0.3,
+          "widthMeters": 0.9,
+          "heightMeters": 0.02,
+          "depthMeters": 0.6,
+          "color": "#8c7a6b",
+          "parentId": "4db42ad8-73d5-4cca-a00d-407ce1e9b012"
+        },
+        {
+          "id": "ac857097-19d3-4f24-ad7e-4e8d60e22a06",
+          "shape": "box",
+          "xMeters": 0,
+          "yMeters": 0.5,
+          "zMeters": 0.3,
+          "widthMeters": 0.9,
+          "heightMeters": 0.02,
+          "depthMeters": 0.6,
+          "color": "#8c7a6b",
+          "parentId": "4db42ad8-73d5-4cca-a00d-407ce1e9b012"
+        }
+      ],
+      "createdAt": "2026-11-26T05:39:09.423Z",
+      "modifiedAt": "2026-11-26T05:46:42.215Z"
+    }
+  ]
+}
