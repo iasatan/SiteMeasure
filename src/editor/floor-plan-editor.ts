@@ -383,11 +383,12 @@ export class FloorPlanEditor {
   setCornerAngle(degrees: number): boolean {
     const wall = this.selectedWall();
     if (!wall) return false;
+    const previousWalls = structuredClone(this.room.walls);
     const preview = structuredClone(this.room.walls);
     if (!setCornerAngle(preview, this.room.walls.indexOf(wall), degrees)) return false;
     this.beginAction();
     setCornerAngle(this.room.walls, this.room.walls.indexOf(wall), degrees);
-    this.syncPolygonFromWalls();
+    this.syncPolygonFromWalls(previousWalls);
     this.commitAction();
     return true;
   }
@@ -924,7 +925,7 @@ export class FloorPlanEditor {
     if (this.dragEndpoint) this.moveConnectedEndpoint(source, wall, this.dragEndpoint, delta);
     else this.moveWholeWall(source, wall, delta);
     delete wall.lengthMeters;
-    this.syncPolygonFromWalls();
+    this.syncPolygonFromWalls(this.originalRoom.walls);
     this.syncMountedObjects();
     this.renderGeometryOnly();
     return true;
@@ -1121,7 +1122,7 @@ export class FloorPlanEditor {
 
   private addRoomPoint(world: Point): void {
     const raw = this.normalizedPoint(world);
-    if (this.drawingPoints.length >= 3 && distanceBetween(raw, this.drawingPoints[0]) < 0.25) {
+    if (this.drawingPoints.length >= 3 && distanceBetween(raw, this.drawingPoints[0]) <= this.roomClosureTolerance()) {
       this.finishRoom();
       return;
     }
@@ -1320,6 +1321,7 @@ export class FloorPlanEditor {
   /** Moves the wall's end point and keeps the room connected; a perpendicular next wall is translated so rectangles shrink instead of tearing. */
   private resizeWall(wall: Wall, lengthMeters: number): void {
     const walls = this.room.walls;
+    const previousWalls = structuredClone(walls);
     const oldEnd = structuredClone(wall.end);
     const angle = Math.atan2(wall.end.yMeters - wall.start.yMeters, wall.end.xMeters - wall.start.xMeters);
     const newEnd = {
@@ -1333,6 +1335,13 @@ export class FloorPlanEditor {
     const next = walls[(index + 1) % walls.length];
     const following = walls[(index + 2) % walls.length];
     const closed = walls.length >= 3 && walls.every((candidate, i) => distanceBetween(i === index ? oldEnd : candidate.end, walls[(i + 1) % walls.length].start) < 0.05);
+    const opening = [...this.room.doors, ...this.room.windows].find((candidate) => candidate.wallId === wall.id && candidate.rightWallId);
+    const continuation = opening?.rightWallId ? walls.find((candidate) => candidate.id === opening.rightWallId) : undefined;
+    if (continuation) {
+      continuation.start = { xMeters: continuation.start.xMeters + delta.xMeters, yMeters: continuation.start.yMeters + delta.yMeters };
+    } else if (!closed && (distanceBetween(next.start, oldEnd) < 0.05 || this.room.points.some((point) => distanceBetween(point, next.start) < 1e-6))) {
+      next.start = structuredClone(newEnd);
+    }
     if (closed && next !== wall) {
       const cross = (a: Wall) => (a.end.xMeters - a.start.xMeters) * (wall.end.yMeters - wall.start.yMeters) - (a.end.yMeters - a.start.yMeters) * (wall.end.xMeters - wall.start.xMeters);
       const dot = (a: Wall, b: Wall) => (a.end.xMeters - a.start.xMeters) * (b.end.xMeters - b.start.xMeters) + (a.end.yMeters - a.start.yMeters) * (b.end.yMeters - b.start.yMeters);
@@ -1346,12 +1355,27 @@ export class FloorPlanEditor {
       delete next.lengthMeters;
       if (perpendicular && parallel) delete following.lengthMeters;
     }
-    this.syncPolygonFromWalls();
+    this.syncPolygonFromWalls(previousWalls);
   }
 
-  private syncPolygonFromWalls(): void {
-    if (this.room.points.length !== this.room.walls.length) return;
-    this.room.points = this.room.walls.map((wall) => structuredClone(wall.start));
+  private syncPolygonFromWalls(previousWalls?: Wall[]): void {
+    if (this.room.points.length === this.room.walls.length) {
+      this.room.points = this.room.walls.map((wall) => structuredClone(wall.start));
+      return;
+    }
+    if (!previousWalls) return;
+    const currentWalls = new Map(this.room.walls.map((wall) => [wall.id, wall]));
+    this.room.points = this.room.points.map((point) => {
+      const source = previousWalls.find((wall) => distanceBetween(wall.start, point) < 1e-6 || distanceBetween(wall.end, point) < 1e-6);
+      const current = source ? currentWalls.get(source.id) : undefined;
+      if (!source || !current) return point;
+      return distanceBetween(source.start, point) < 1e-6 ? structuredClone(current.start) : structuredClone(current.end);
+    });
+  }
+
+  private roomClosureTolerance(): number {
+    const width = Math.max(this.svg.clientWidth, 280);
+    return Math.min(0.6, Math.max(0.25, this.viewBox.width * 14 / width));
   }
 
   private normalizedPoint(point: Point): Point {

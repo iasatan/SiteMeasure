@@ -4,7 +4,7 @@ import { FloorPlanEditor } from '../src/editor/floor-plan-editor';
 
 interface EditorInternals {
   element: HTMLElement;
-  room: { walls: Array<{ id: string; start: { xMeters: number; yMeters: number }; end: { xMeters: number; yMeters: number } }>; doors: Array<{ id: string; wallId: string; rightWallId?: string; offsetMeters: number; widthMeters: number }> };
+  room: { points: Array<{ xMeters: number; yMeters: number }>; walls: Array<{ id: string; start: { xMeters: number; yMeters: number }; end: { xMeters: number; yMeters: number } }>; doors: Array<{ id: string; wallId: string; rightWallId?: string; offsetMeters: number; widthMeters: number }> };
   selection: { type: 'wall' | 'door' | 'window' | 'room' | 'object'; id: string } | null;
   dragOrigin: { xMeters: number; yMeters: number };
   originalRoom: unknown;
@@ -112,6 +112,20 @@ describe('floor plan editor', () => {
     }
     expect(editor.getRoom().walls).toHaveLength(4);
     expect(editor.element.querySelector('.editor-summary')?.textContent).toBe('12.00 m² plan');
+  });
+
+  it('closes a room when the final touch lands within the start-point target', () => {
+    const editor = new FloorPlanEditor({ room: createRoom(), layer: 'builder', units: 'metric', onChange: () => {}, onSelection: () => {} }) as unknown as {
+      addRoomPoint(point: { xMeters: number; yMeters: number }): void;
+      getRoom(): ReturnType<typeof createRoom>;
+    };
+    editor.addRoomPoint({ xMeters: 0, yMeters: 0 });
+    editor.addRoomPoint({ xMeters: 4, yMeters: 0 });
+    editor.addRoomPoint({ xMeters: 4, yMeters: 3 });
+    editor.addRoomPoint({ xMeters: 0.4, yMeters: 0.2 });
+
+    expect(editor.getRoom().points).toHaveLength(3);
+    expect(editor.getRoom().walls).toHaveLength(3);
   });
 
   it('does not save a cancelled room drag', () => {
@@ -570,6 +584,48 @@ describe('floor plan editor', () => {
     editor.selection = { type: 'wall', id: 'w2' };
     editor.setWallLength(2);
     expect(loop(editor)).toEqual([[1, 0, 3, 0], [3, 0, 3, 4], [3, 4, 1, 4], [1, 4, 1, 0]]);
+  });
+
+  it('keeps split-opening walls connected and the floor outline synced during resize', () => {
+    const editor = rectangleEditor();
+    editor.selection = { type: 'wall', id: 'w0' };
+    editor.addDoorToSelectedWall(0.6);
+    const roomAfterOpening = editor.room as ReturnType<typeof createRoom>;
+    const opening = roomAfterOpening.doors[0];
+    const rightWall = roomAfterOpening.walls.find((wall) => wall.id === opening.rightWallId)!;
+
+    editor.setWallLength(2);
+    expect(editor.room.walls.find((wall) => wall.id === opening.rightWallId)?.start.xMeters).toBeCloseTo(2.6);
+    expect(editor.room.doors[0].widthMeters).toBeCloseTo(0.6);
+
+    editor.selection = { type: 'wall', id: rightWall.id };
+    editor.setWallLength(2.2);
+    const resizedRoom = editor.room as ReturnType<typeof createRoom>;
+    const resizedRightWall = resizedRoom.walls.find((wall) => wall.id === rightWall.id)!;
+    expect(resizedRightWall.end.xMeters).toBeCloseTo(4.8);
+    expect(resizedRoom.walls.find((wall) => wall.id === 'w1')?.start.xMeters).toBeCloseTo(4.8);
+    expect(resizedRoom.points[1].xMeters).toBeCloseTo(4.8);
+  });
+
+  it('reconnects a resized segment to a stale room vertex', () => {
+    const room = createRoom();
+    room.points = [[0, 0], [4, 0], [4, 4], [0, 4]].map(([xMeters, yMeters]) => ({ xMeters, yMeters }));
+    room.walls = [
+      { id: 'left', start: room.points[0], end: { xMeters: 1.7, yMeters: 0 }, thicknessMeters: 0.15 },
+      { id: 'right', start: { xMeters: 2.3, yMeters: 0 }, end: { xMeters: 3.5, yMeters: 0 }, thicknessMeters: 0.15 },
+      { id: 'next', start: room.points[1], end: room.points[2], thicknessMeters: 0.15 },
+      { id: 'bottom', start: room.points[2], end: room.points[3], thicknessMeters: 0.15 },
+      { id: 'closing', start: room.points[3], end: room.points[0], thicknessMeters: 0.15 },
+    ];
+    room.windows = [{ id: 'window', wallId: 'left', rightWallId: 'right', offsetMeters: 1.7, widthMeters: 0.6 }];
+    const editor = new FloorPlanEditor({ room, units: 'metric', onChange: () => {}, onSelection: () => {} }) as unknown as EditorInternals;
+    editor.selection = { type: 'wall', id: 'right' };
+
+    editor.setWallLength(1.4);
+
+    expect(editor.room.walls.find((wall) => wall.id === 'right')?.end.xMeters).toBeCloseTo(3.7);
+    expect(editor.room.walls.find((wall) => wall.id === 'next')?.start.xMeters).toBeCloseTo(3.7);
+    expect(editor.room.points[1].xMeters).toBeCloseTo(3.7);
   });
 
   it('opens distance editors on double-click targets', () => {
