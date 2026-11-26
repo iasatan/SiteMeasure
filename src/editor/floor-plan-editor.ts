@@ -1469,7 +1469,7 @@ export class FloorPlanEditor {
   private syncMeasuredWallLocks(): void {
     const measuredWallIds = new Set(this.room.measurements.filter((measurement) => measurement.targetType === 'wall').map((measurement) => measurement.targetId));
     for (const wall of this.room.walls) {
-      if (measuredWallIds.has(wall.id)) wall.locked = true;
+      if (measuredWallIds.has(wall.id) && wall.locked === undefined) wall.locked = true;
     }
   }
 

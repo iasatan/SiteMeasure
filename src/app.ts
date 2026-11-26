@@ -417,10 +417,7 @@ export class SiteMeasureApp {
         wallActions.append(button('Join', 'button quiet', () => this.activeEditor?.joinSelection()));
         wallActions.append(button('Duplicate', 'button quiet', () => this.activeEditor?.duplicateSelection()));
         wallActions.append(button('Copy', 'button quiet', () => this.activeEditor?.copySelection()));
-        const measured = room.measurements.some((measurement) => measurement.targetType === 'wall' && measurement.targetId === wall.id);
         const lockButton = button(wall.locked ? 'Unlock' : 'Lock', 'button quiet', () => this.activeEditor?.toggleLockSelection());
-        lockButton.disabled = measured;
-        if (measured) lockButton.title = 'Measured wall dimensions stay locked';
         wallActions.append(lockButton);
         wallActions.append(button('Delete', 'button danger', () => this.activeEditor?.deleteSelection()));
         inspector.append(length, editLength, this.cornerAngleField(), this.openingList(project), wallActions);

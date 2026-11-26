@@ -915,6 +915,22 @@ describe('floor plan editor', () => {
     expect(onMeasure).not.toHaveBeenCalled();
   });
 
+  it('keeps a measured wall unlocked after using the unlock action', () => {
+    const room = createRoom();
+    room.walls = [{ id: 'measured', start: { xMeters: 0, yMeters: 0 }, end: { xMeters: 2, yMeters: 0 }, thicknessMeters: 0.15, locked: true }];
+    room.measurements = [{ id: 'measurement', targetType: 'wall', targetId: 'measured', valueMeters: 2, capturedAt: '2026-01-01T00:00:00Z', source: 'manual' }];
+    const editor = new FloorPlanEditor({ room, layer: 'builder', units: 'metric', onChange: () => {}, onSelection: () => {} });
+    const internals = editor as unknown as { selection: { type: 'wall'; id: string } };
+    internals.selection = { type: 'wall', id: 'measured' };
+
+    editor.toggleLockSelection();
+
+    expect(editor.getRoom().walls[0].locked).toBe(false);
+    expect(editor.setWallLength(2.5)).toBe(true);
+    expect(editor.getRoom().walls[0].locked).toBe(false);
+    expect(editor.getRoom().measurements).toHaveLength(1);
+  });
+
   it('uses a 60 cm default for doors added from either wall action or drawing tool', () => {
     const selectedWallEditor = rectangleEditor();
     selectedWallEditor.selection = { type: 'wall', id: 'w0' };
