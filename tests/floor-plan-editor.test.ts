@@ -586,6 +586,44 @@ describe('floor plan editor', () => {
     expect(loop(editor)).toEqual([[1, 0, 3, 0], [3, 0, 3, 4], [3, 4, 1, 4], [1, 4, 1, 0]]);
   });
 
+  it('keeps rectangle corners square when a boundary wall is resized beside an opening', () => {
+    const room = createRoom();
+    room.points = [[0, 0], [4, 0], [4, 4], [0, 4]].map(([xMeters, yMeters]) => ({ xMeters, yMeters }));
+    room.walls = [
+      { id: 'top-left', start: room.points[0], end: { xMeters: 1.5, yMeters: 0 }, thicknessMeters: 0.15 },
+      { id: 'top-right', start: { xMeters: 2.5, yMeters: 0 }, end: room.points[1], thicknessMeters: 0.15 },
+      { id: 'right', start: room.points[1], end: room.points[2], thicknessMeters: 0.15 },
+      { id: 'bottom', start: room.points[2], end: room.points[3], thicknessMeters: 0.15 },
+      { id: 'left', start: room.points[3], end: room.points[0], thicknessMeters: 0.15 },
+    ];
+    room.doors = [{ id: 'door', wallId: 'top-left', rightWallId: 'top-right', offsetMeters: 1.5, widthMeters: 1 }];
+    const editor = new FloorPlanEditor({ room, units: 'metric', onChange: () => {}, onSelection: () => {} });
+    (editor as unknown as EditorInternals).selection = { type: 'wall', id: 'right' };
+
+    expect(editor.setWallLength(3.5)).toBe(true);
+    expect(editor.getRoom().points.map((point) => [point.xMeters, point.yMeters])).toEqual([[0, 0], [4, 0], [4, 3.5], [0, 3.5]]);
+  });
+
+  it('makes a four-sided skewed room rectangular', () => {
+    const room = createRoom();
+    room.points = [[0, 0], [4, 0], [5, 3], [1, 3]].map(([xMeters, yMeters]) => ({ xMeters, yMeters }));
+    room.walls = room.points.map((start, index) => ({ id: `wall${index}`, start, end: room.points[(index + 1) % 4], thicknessMeters: 0.15 }));
+    room.walls[0].locked = true;
+    const editor = new FloorPlanEditor({ room, layer: 'builder', units: 'metric', onChange: () => {}, onSelection: () => {} });
+
+    expect(editor.canRectangularizeRoom()).toBe(true);
+    expect(editor.rectangularizeRoom()).toBe(true);
+    const points = editor.getRoom().points;
+    for (let index = 0; index < points.length; index += 1) {
+      const current = points[index];
+      const previous = points[(index + points.length - 1) % points.length];
+      const next = points[(index + 1) % points.length];
+      const first = { xMeters: previous.xMeters - current.xMeters, yMeters: previous.yMeters - current.yMeters };
+      const second = { xMeters: next.xMeters - current.xMeters, yMeters: next.yMeters - current.yMeters };
+      expect(first.xMeters * second.xMeters + first.yMeters * second.yMeters).toBeCloseTo(0);
+    }
+  });
+
   it('keeps split-opening walls connected and the floor outline synced during resize', () => {
     const editor = rectangleEditor();
     editor.selection = { type: 'wall', id: 'w0' };
@@ -605,6 +643,69 @@ describe('floor plan editor', () => {
     expect(resizedRightWall.end.xMeters).toBeCloseTo(4.8);
     expect(resizedRoom.walls.find((wall) => wall.id === 'w1')?.start.xMeters).toBeCloseTo(4.8);
     expect(resizedRoom.points[1].xMeters).toBeCloseTo(4.8);
+  });
+
+  it('resizes a matching opposite boundary without skewing a split-opening rectangle', () => {
+    const room = createRoom();
+    room.points = [[0, 0], [4, 0], [4, 4], [0, 4]].map(([xMeters, yMeters]) => ({ xMeters, yMeters }));
+    room.walls = [
+      { id: 'top-left', start: room.points[0], end: { xMeters: 1.5, yMeters: 0 }, thicknessMeters: 0.15 },
+      { id: 'top-right', start: { xMeters: 2.5, yMeters: 0 }, end: room.points[1], thicknessMeters: 0.15 },
+      { id: 'right', start: room.points[1], end: room.points[2], thicknessMeters: 0.15 },
+      { id: 'bottom', start: room.points[2], end: room.points[3], thicknessMeters: 0.15 },
+      { id: 'left', start: room.points[3], end: room.points[0], thicknessMeters: 0.15 },
+    ];
+    room.doors = [{ id: 'door', wallId: 'top-left', rightWallId: 'top-right', offsetMeters: 1.5, widthMeters: 1 }];
+    const editor = new FloorPlanEditor({ room, units: 'metric', onChange: () => {}, onSelection: () => {} });
+
+    expect(editor.updateOpening('door', 'door', 3, 1.2, 0.6)).toBe(true);
+    const points = editor.getRoom().points;
+    const [topLeft, topRight, bottomRight, bottomLeft] = points;
+    expect(Math.hypot(topRight.xMeters - topLeft.xMeters, topRight.yMeters - topLeft.yMeters)).toBeCloseTo(3);
+    expect(Math.hypot(bottomLeft.xMeters - bottomRight.xMeters, bottomLeft.yMeters - bottomRight.yMeters)).toBeCloseTo(3);
+    expect(Math.hypot(topRight.xMeters - bottomRight.xMeters, topRight.yMeters - bottomRight.yMeters)).toBeCloseTo(4);
+    expect(Math.hypot(bottomLeft.xMeters - topLeft.xMeters, bottomLeft.yMeters - topLeft.yMeters)).toBeCloseTo(4);
+    expect(Math.abs(topRight.xMeters - bottomRight.xMeters)).toBeCloseTo(0);
+    expect(Math.abs(bottomLeft.xMeters - topLeft.xMeters)).toBeCloseTo(0);
+
+    const unevenRoom = createRoom();
+    unevenRoom.points = [[0, 0], [4, 0], [3.5, 4], [0, 4]].map(([xMeters, yMeters]) => ({ xMeters, yMeters }));
+    unevenRoom.walls = [
+      { id: 'top-left', start: unevenRoom.points[0], end: { xMeters: 1.5, yMeters: 0 }, thicknessMeters: 0.15 },
+      { id: 'top-right', start: { xMeters: 2.5, yMeters: 0 }, end: unevenRoom.points[1], thicknessMeters: 0.15 },
+      { id: 'right', start: unevenRoom.points[1], end: unevenRoom.points[2], thicknessMeters: 0.15 },
+      { id: 'bottom', start: unevenRoom.points[2], end: unevenRoom.points[3], thicknessMeters: 0.15 },
+      { id: 'left', start: unevenRoom.points[3], end: unevenRoom.points[0], thicknessMeters: 0.15 },
+    ];
+    unevenRoom.doors = [{ id: 'door', wallId: 'top-left', rightWallId: 'top-right', offsetMeters: 1.5, widthMeters: 1 }];
+    const unevenEditor = new FloorPlanEditor({ room: unevenRoom, units: 'metric', onChange: () => {}, onSelection: () => {} });
+    expect(unevenEditor.updateOpening('door', 'door', 3, 1.2, 0.6)).toBe(true);
+    expect(unevenEditor.getRoom().points[2].xMeters).toBeCloseTo(3.5);
+    expect(Math.hypot(unevenEditor.getRoom().points[2].xMeters - unevenEditor.getRoom().points[3].xMeters, unevenEditor.getRoom().points[2].yMeters - unevenEditor.getRoom().points[3].yMeters)).toBeCloseTo(3.5);
+  });
+
+  it('aligns split openings with their wall and locks measured dimensions', () => {
+    const room = createRoom();
+    room.points = [[0, 0], [4, 2], [4, 4], [0, 4]].map(([xMeters, yMeters]) => ({ xMeters, yMeters }));
+    room.walls = [
+      { id: 'left', start: { xMeters: 0, yMeters: 0 }, end: { xMeters: 1, yMeters: 0.2 }, thicknessMeters: 0.15 },
+      { id: 'right', start: { xMeters: 2, yMeters: 0.4 }, end: { xMeters: 4, yMeters: 2 }, thicknessMeters: 0.15 },
+    ];
+    room.doors = [{ id: 'door', wallId: 'left', rightWallId: 'right', offsetMeters: 1, widthMeters: 1 }];
+    const editor = new FloorPlanEditor({ room, units: 'metric', onChange: () => {}, onSelection: () => {} });
+    const repaired = editor.getRoom();
+    const left = repaired.walls[0];
+    const right = repaired.walls[1];
+    const wallDx = right.end.xMeters - left.start.xMeters;
+    const wallDy = right.end.yMeters - left.start.yMeters;
+    const openingDx = right.start.xMeters - left.end.xMeters;
+    const openingDy = right.start.yMeters - left.end.yMeters;
+    expect(wallDx * openingDy - wallDy * openingDx).toBeCloseTo(0);
+
+    (editor as unknown as EditorInternals).selection = { type: 'wall', id: 'left' };
+    expect(editor.setWallLength(1, { id: 'measurement', targetType: 'wall', targetId: 'left', valueMeters: 1, capturedAt: '2026-01-01T00:00:00Z', source: 'manual' })).toBe(true);
+    expect(editor.getRoom().walls.find((wall) => wall.id === 'left')?.locked).toBe(true);
+    expect(editor.element.querySelector('[data-wall-lock="left"]')).not.toBeNull();
   });
 
   it('reconnects a resized segment to a stale room vertex', () => {
@@ -687,6 +788,56 @@ describe('floor plan editor', () => {
     expect(editor.room.walls).toHaveLength(4);
     expect(editor.room.doors).toHaveLength(0);
     expect(editor.room.walls[0].end).toEqual({ xMeters: 4, yMeters: 0 });
+  });
+
+  it('shows overall and left-door-right dimensions beside an opened wall', () => {
+    const editor = rectangleEditor();
+    editor.selection = { type: 'wall', id: 'w0' };
+    editor.addDoorToSelectedWall(1);
+
+    const dimensions = [...editor.element.querySelectorAll<SVGGElement>('.editor-wall-dimensions[data-wall-id="w0"] .editor-dimension-group')];
+    expect(dimensions.map((dimension) => dimension.dataset.dimensionPart)).toEqual(['overall', 'left', 'door', 'right']);
+    const detailLines = dimensions.slice(1).map((dimension) => dimension.querySelector<SVGLineElement>('.editor-dimension-line')!);
+    expect(detailLines.every((line) => Number(line.getAttribute('y1')) < 0)).toBe(true);
+  });
+
+  it('opens the matching editor when a wall or door dimension is tapped', () => {
+    const calls: string[] = [];
+    const room = createRoom();
+    room.points = [[0, 0], [4, 0], [4, 4], [0, 4]].map(([xMeters, yMeters]) => ({ xMeters, yMeters }));
+    room.walls = room.points.map((start, index) => ({ id: `wall${index}`, start, end: room.points[(index + 1) % 4], thicknessMeters: 0.15 }));
+    const editor = new FloorPlanEditor({
+      room,
+      units: 'metric',
+      onChange: () => {},
+      onSelection: () => {},
+      onMeasure: (wall) => calls.push(`wall:${wall.id}`),
+      onOpening: (kind, id) => calls.push(`${kind}:${id}`),
+    });
+    const tap = (target: SVGElement) => {
+      const svg = target.ownerSVGElement!;
+      Object.assign(svg, { createSVGPoint: () => ({ x: 0, y: 0 }), getScreenCTM: () => null });
+      const event = new MouseEvent('pointerdown', { button: 0, bubbles: true, cancelable: true });
+      Object.assign(event, { pointerId: 1, pointerType: 'mouse' });
+      target.dispatchEvent(event);
+    };
+
+    tap(editor.element.querySelector<SVGElement>('[data-dimension-wall-id="wall0"] .editor-dimension-hit')!);
+    expect(calls).toContain('wall:wall0');
+
+    const dimensionEditor = rectangleEditor();
+    dimensionEditor.selection = { type: 'wall', id: 'w0' };
+    dimensionEditor.addDoorToSelectedWall(1);
+    const doorId = dimensionEditor.room.doors[0].id;
+    const openingEditor = new FloorPlanEditor({
+      room: dimensionEditor.room as never,
+      units: 'metric',
+      onChange: () => {},
+      onSelection: () => {},
+      onOpening: (kind, id) => calls.push(`${kind}:${id}`),
+    });
+    tap(openingEditor.element.querySelector<SVGElement>(`[data-dimension-opening-id="${doorId}"] .editor-dimension-hit`)!);
+    expect(calls).toContain(`door:${doorId}`);
   });
 
   it('uses a 60 cm default for doors added from either wall action or drawing tool', () => {

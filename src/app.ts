@@ -292,7 +292,7 @@ export class SiteMeasureApp {
     const hierarchy = element('div', 'plan-hierarchy');
     hierarchy.append(this.roomSelector(project));
     if (this.layer === 'builder') hierarchy.append(button('Rename', 'button quiet compact', () => this.renameRoom(project, active)), button('Delete', 'button danger compact', () => this.confirmDeleteRoom(project, active)));
-    this.activeEditor = new FloorPlanEditor({
+    const editor = new FloorPlanEditor({
       room: active,
       units: project.preferredUnits,
       layer: this.layer,
@@ -303,6 +303,9 @@ export class SiteMeasureApp {
       onMeasureClearance: (id, side) => { const room = this.activeRoom(project); if (room) this.showClearanceDialog(project, room, id, side); },
       onOpening: (kind, id) => this.showOpeningDialog(project, kind, id),
     });
+    this.activeEditor = editor;
+    const normalizedRoom = editor.getRoom();
+    if (JSON.stringify(normalizedRoom) !== JSON.stringify(active)) this.updateRoom(project, normalizedRoom, true);
     if (this.layer === 'builder' && active.walls.length === 0 && active.points.length === 0) this.activeEditor.setTool('room');
     canvas.append(hierarchy, this.activeEditor.element);
 
@@ -414,7 +417,11 @@ export class SiteMeasureApp {
         wallActions.append(button('Join', 'button quiet', () => this.activeEditor?.joinSelection()));
         wallActions.append(button('Duplicate', 'button quiet', () => this.activeEditor?.duplicateSelection()));
         wallActions.append(button('Copy', 'button quiet', () => this.activeEditor?.copySelection()));
-        wallActions.append(button(wall.locked ? 'Unlock' : 'Lock', 'button quiet', () => this.activeEditor?.toggleLockSelection()));
+        const measured = room.measurements.some((measurement) => measurement.targetType === 'wall' && measurement.targetId === wall.id);
+        const lockButton = button(wall.locked ? 'Unlock' : 'Lock', 'button quiet', () => this.activeEditor?.toggleLockSelection());
+        lockButton.disabled = measured;
+        if (measured) lockButton.title = 'Measured wall dimensions stay locked';
+        wallActions.append(lockButton);
         wallActions.append(button('Delete', 'button danger', () => this.activeEditor?.deleteSelection()));
         inspector.append(length, editLength, this.cornerAngleField(), this.openingList(project), wallActions);
       }
@@ -464,7 +471,15 @@ export class SiteMeasureApp {
       metrics.append(calculation(formatVolume(roomVolume(room), project.preferredUnits), `Volume at ${formatLength(roomHeight(room), project.preferredUnits)}`));
       metrics.append(calculation(formatArea(wallArea(room.walls, roomHeight(room), openingArea(room.walls, room)), project.preferredUnits), 'Net wall area'));
       inspector.append(metrics);
-      if (this.layer === 'builder') inspector.append(this.roomHeightField(project, room));
+      if (this.layer === 'builder') {
+        if (room.points.length === 4) {
+          const rectangularize = button('Make rectangle', 'button primary stretch', () => this.activeEditor?.rectangularizeRoom());
+          rectangularize.disabled = !this.activeEditor?.canRectangularizeRoom();
+          if (rectangularize.disabled) rectangularize.title = 'Unlock measured walls before changing room geometry.';
+          inspector.append(rectangularize);
+        }
+        inspector.append(this.roomHeightField(project, room));
+      }
       else inspector.append(this.objectsSection(project, room));
       if (issues.length) inspector.append(element('p', 'validation-warning', issues.join(' ')));
       if (this.layer === 'builder') inspector.append(element('p', 'inspector-help', 'Choose Wall or Room, then tap or drag on the plan. Use two fingers to pan and pinch to zoom.'));

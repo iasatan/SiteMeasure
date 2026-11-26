@@ -90,6 +90,8 @@ export class FloorPlanEditor {
     this.onMeasureObject = options.onMeasureObject;
     this.onMeasureClearance = options.onMeasureClearance;
     this.onOpening = options.onOpening;
+    this.syncSplitOpenings();
+    this.syncMeasuredWallLocks();
     this.element = document.createElement('div');
     this.element.className = 'floor-editor';
 
@@ -123,6 +125,8 @@ export class FloorPlanEditor {
 
   setRoom(room: Room): void {
     this.room = structuredClone(room);
+    this.syncSplitOpenings();
+    this.syncMeasuredWallLocks();
     this.selection = null;
     this.measuredClearanceAxes.clear();
     this.render();
@@ -295,10 +299,82 @@ export class FloorPlanEditor {
   setWallLength(lengthMeters: number, measurement?: Measurement): boolean {
     const wall = this.selectedWall();
     if (!wall || wall.locked || !Number.isFinite(lengthMeters) || lengthMeters <= 0) return false;
+    const previousPoints = structuredClone(this.room.points);
+    const boundaryEdgeIndex = this.findBoundaryEdgeIndex(previousPoints, wall.start, wall.end);
+    const movedVertexIndex = previousPoints.findIndex((point) => distanceBetween(point, wall.end) < 1e-6);
+    const wallsWereClosed = this.room.walls.every((candidate, index) => distanceBetween(candidate.end, this.room.walls[(index + 1) % this.room.walls.length].start) < 0.05);
     this.beginAction();
     this.resizeWall(wall, lengthMeters);
+    if (!wallsWereClosed && boundaryEdgeIndex !== null && movedVertexIndex >= 0) {
+      this.preserveOppositeBoundary(previousPoints, boundaryEdgeIndex, movedVertexIndex);
+    }
     this.commitAction(measurement);
     return true;
+  }
+
+  canRectangularizeRoom(): boolean {
+    if (this.room.points.length !== 4 || this.room.walls.length < 4 || !this.canEditSelection({ type: 'room', id: this.room.id })) return false;
+    const nextPoints = this.rectangularizedPoints();
+    if (!nextPoints) return false;
+    return this.room.walls.every((wall) => {
+      if (!wall.locked) return true;
+      const edgeIndex = this.findBoundaryEdgeIndex(this.room.points, wall.start, wall.end);
+      if (edgeIndex === null) return true;
+      const nextStart = this.projectPointBetweenEdges(wall.start, this.room.points, nextPoints, edgeIndex);
+      const nextEnd = this.projectPointBetweenEdges(wall.end, this.room.points, nextPoints, edgeIndex);
+      return Math.abs(distanceBetween(nextStart, nextEnd) - distanceBetween(wall.start, wall.end)) <= 0.001;
+    });
+  }
+
+  rectangularizeRoom(): boolean {
+    if (!this.canRectangularizeRoom()) return false;
+    const previousPoints = structuredClone(this.room.points);
+    const nextPoints = this.rectangularizedPoints();
+    if (!nextPoints) return false;
+    const oldWallLengths = new Map(this.room.walls.map((wall) => [wall.id, distanceBetween(wall.start, wall.end)]));
+    this.beginAction();
+    this.room.points = nextPoints;
+    for (const wall of this.room.walls) {
+      const edgeIndex = this.findBoundaryEdgeIndex(previousPoints, wall.start, wall.end);
+      if (edgeIndex === null) continue;
+      wall.start = this.projectPointBetweenEdges(wall.start, previousPoints, nextPoints, edgeIndex);
+      wall.end = this.projectPointBetweenEdges(wall.end, previousPoints, nextPoints, edgeIndex);
+      delete wall.lengthMeters;
+    }
+    for (const opening of [...this.room.doors, ...this.room.windows]) {
+      if (opening.rightWallId) continue;
+      const wall = this.room.walls.find((candidate) => candidate.id === opening.wallId);
+      const previousLength = oldWallLengths.get(opening.wallId) ?? 0;
+      const nextLength = wall ? distanceBetween(wall.start, wall.end) : 0;
+      if (previousLength <= 1e-9) continue;
+      const ratio = nextLength / previousLength;
+      opening.offsetMeters *= ratio;
+      opening.widthMeters *= ratio;
+    }
+    this.commitAction();
+    return true;
+  }
+
+  private rectangularizedPoints(): Point[] | null {
+    if (this.room.points.length !== 4) return null;
+    const edgeLengths = this.room.points.map((point, index) => distanceBetween(point, this.room.points[(index + 1) % 4]));
+    const width = (edgeLengths[0] + edgeLengths[2]) / 2;
+    const height = (edgeLengths[1] + edgeLengths[3]) / 2;
+    if (width <= 1e-6 || height <= 1e-6) return null;
+    const firstEdge = { xMeters: this.room.points[1].xMeters - this.room.points[0].xMeters, yMeters: this.room.points[1].yMeters - this.room.points[0].yMeters };
+    const firstLength = edgeLengths[0];
+    if (firstLength <= 1e-6) return null;
+    const axis = { xMeters: firstEdge.xMeters / firstLength, yMeters: firstEdge.yMeters / firstLength };
+    let normal = { xMeters: -axis.yMeters, yMeters: axis.xMeters };
+    const towardInterior = (this.room.points[2].xMeters - this.room.points[1].xMeters) * normal.xMeters + (this.room.points[2].yMeters - this.room.points[1].yMeters) * normal.yMeters;
+    if (towardInterior < 0) normal = { xMeters: -normal.xMeters, yMeters: -normal.yMeters };
+    const origin = this.room.points[0];
+    return [
+      structuredClone(origin),
+      { xMeters: origin.xMeters + axis.xMeters * width, yMeters: origin.yMeters + axis.yMeters * width },
+      { xMeters: origin.xMeters + axis.xMeters * width + normal.xMeters * height, yMeters: origin.yMeters + axis.yMeters * width + normal.yMeters * height },
+      { xMeters: origin.xMeters + normal.xMeters * height, yMeters: origin.yMeters + normal.yMeters * height },
+    ];
   }
 
   applySelectedMeasurement(measurement: Measurement): boolean {
@@ -417,8 +493,13 @@ export class FloorPlanEditor {
     if (offsetMeters + widthMeters > wallLengthMeters + 1e-9) return false;
     const rightWall = opening.rightWallId ? this.room.walls.find((candidate) => candidate.id === opening.rightWallId) : undefined;
     if (opening.rightWallId && (!rightWall || offsetMeters <= 0 || offsetMeters + widthMeters >= wallLengthMeters)) return false;
+    const previousPoints = structuredClone(this.room.points);
+    const boundaryEdgeIndex = rightWall ? this.findBoundaryEdgeIndex(previousPoints, leftWall.start, rightWall.end) : null;
     this.beginAction();
-    if (rightWall) this.resizeSplitOpening(leftWall, rightWall, wallLengthMeters, offsetMeters, widthMeters);
+    if (rightWall) {
+      this.resizeSplitOpening(leftWall, rightWall, wallLengthMeters, offsetMeters, widthMeters);
+      if (boundaryEdgeIndex !== null) this.preserveOppositeBoundary(previousPoints, boundaryEdgeIndex);
+    }
     else if (Math.abs(wallLengthMeters - distanceBetween(leftWall.start, leftWall.end)) > 1e-9) this.resizeWall(leftWall, wallLengthMeters);
     opening.offsetMeters = offsetMeters;
     opening.widthMeters = widthMeters;
@@ -642,6 +723,12 @@ export class FloorPlanEditor {
       return;
     }
 
+    const dimension = (event.target as Element).closest<SVGGElement>('[data-dimension-part]');
+    if (this.tool === 'select' && dimension) {
+      this.editDimension(dimension);
+      return;
+    }
+
     let target = (event.target as Element).closest<SVGElement>('[data-wall-id], [data-opening-id], [data-object-id], [data-room-id]');
     if (this.tool === 'select') target = this.nearestSelectionTarget(world, target);
     this.doubleClickSelection = target?.dataset.openingId && (target.dataset.openingType === 'door' || target.dataset.openingType === 'window')
@@ -654,6 +741,24 @@ export class FloorPlanEditor {
     if (event.pointerType === 'mouse' && this.tool === 'wall' && this.wallStart) return;
     if (this.handleToolPointer(world, target)) return;
     this.handleSelectionPointer(world, target);
+  }
+
+  private editDimension(dimension: SVGGElement): void {
+    const openingId = dimension.dataset.dimensionOpeningId;
+    if (openingId) {
+      const door = this.room.doors.find((opening) => opening.id === openingId);
+      const window = this.room.windows.find((opening) => opening.id === openingId);
+      const selection: EditorSelection = door ? { type: 'door', id: door.id } : window ? { type: 'window', id: window.id } : null;
+      if (!selection || !this.canEditSelection(selection)) return;
+      this.select(selection);
+      this.onOpening?.(selection.type as 'door' | 'window', selection.id);
+      return;
+    }
+    const wallId = dimension.dataset.dimensionWallId;
+    const wall = this.room.walls.find((candidate) => candidate.id === wallId);
+    if (!wall || wall.locked || !this.canEditSelection({ type: 'wall', id: wall.id })) return;
+    this.select({ type: 'wall', id: wall.id });
+    this.onMeasure?.(structuredClone(wall));
   }
 
   private handleToolPointer(world: Point, target: SVGElement | null): boolean {
@@ -1239,6 +1344,66 @@ export class FloorPlanEditor {
     this.room.points = this.room.points.map((point) => distanceBetween(point, oldEnd) < 0.05 ? structuredClone(rightWall.end) : point);
   }
 
+  private findBoundaryEdgeIndex(points: Point[], start: Point, end: Point): number | null {
+    if (points.length !== 4) return null;
+    for (let index = 0; index < points.length; index += 1) {
+      const edgeStart = points[index];
+      const edgeEnd = points[(index + 1) % points.length];
+      const dx = edgeEnd.xMeters - edgeStart.xMeters;
+      const dy = edgeEnd.yMeters - edgeStart.yMeters;
+      const lengthSquared = dx * dx + dy * dy;
+      if (lengthSquared <= 1e-9) continue;
+      const length = Math.sqrt(lengthSquared);
+      const liesOnEdge = (point: Point) => {
+        const px = point.xMeters - edgeStart.xMeters;
+        const py = point.yMeters - edgeStart.yMeters;
+        const projection = (px * dx + py * dy) / lengthSquared;
+        const distance = Math.abs(dx * py - dy * px) / length;
+        return distance <= 0.05 && projection >= -0.05 / length && projection <= 1 + 0.05 / length;
+      };
+      if (liesOnEdge(start) && liesOnEdge(end)) return index;
+    }
+    return null;
+  }
+
+  private preserveOppositeBoundary(previousPoints: Point[], edgeIndex: number, movedVertexIndex = (edgeIndex + 1) % 4): void {
+    if (previousPoints.length !== 4) return;
+    const oppositeIndex = movedVertexIndex === edgeIndex ? (edgeIndex + 3) % 4 : (edgeIndex + 2) % 4;
+    const edgeStart = previousPoints[edgeIndex];
+    const edgeEnd = previousPoints[(edgeIndex + 1) % 4];
+    const oppositeStart = previousPoints[oppositeIndex];
+    const oppositeEnd = previousPoints[(oppositeIndex + 1) % 4];
+    const edge = { xMeters: edgeEnd.xMeters - edgeStart.xMeters, yMeters: edgeEnd.yMeters - edgeStart.yMeters };
+    const opposite = { xMeters: oppositeEnd.xMeters - oppositeStart.xMeters, yMeters: oppositeEnd.yMeters - oppositeStart.yMeters };
+    const edgeLength = Math.hypot(edge.xMeters, edge.yMeters);
+    const oppositeLength = Math.hypot(opposite.xMeters, opposite.yMeters);
+    const cross = edge.xMeters * opposite.yMeters - edge.yMeters * opposite.xMeters;
+    const dot = edge.xMeters * opposite.xMeters + edge.yMeters * opposite.yMeters;
+    if (Math.abs(edgeLength - oppositeLength) > 0.05 || Math.abs(cross) > edgeLength * oppositeLength * 1e-6 || dot >= 0) return;
+
+    const selectedEnd = this.room.points[movedVertexIndex];
+    const previousSelectedEnd = previousPoints[movedVertexIndex];
+    const delta = { xMeters: selectedEnd.xMeters - previousSelectedEnd.xMeters, yMeters: selectedEnd.yMeters - previousSelectedEnd.yMeters };
+    if (Math.hypot(delta.xMeters, delta.yMeters) <= 1e-9) return;
+    const previousOppositeCorner = previousPoints[oppositeIndex];
+    const nextOppositeCorner = { xMeters: previousOppositeCorner.xMeters + delta.xMeters, yMeters: previousOppositeCorner.yMeters + delta.yMeters };
+    this.room.points[oppositeIndex] = nextOppositeCorner;
+    this.moveConnectedPoint(previousOppositeCorner, nextOppositeCorner, new Set());
+  }
+
+  private projectPointBetweenEdges(point: Point, previousPoints: Point[], nextPoints: Point[], edgeIndex: number): Point {
+    const start = previousPoints[edgeIndex];
+    const end = previousPoints[(edgeIndex + 1) % 4];
+    const dx = end.xMeters - start.xMeters;
+    const dy = end.yMeters - start.yMeters;
+    const lengthSquared = dx * dx + dy * dy;
+    if (lengthSquared <= 1e-9) return structuredClone(point);
+    const ratio = Math.max(0, Math.min(1, ((point.xMeters - start.xMeters) * dx + (point.yMeters - start.yMeters) * dy) / lengthSquared));
+    const nextStart = nextPoints[edgeIndex];
+    const nextEnd = nextPoints[(edgeIndex + 1) % 4];
+    return { xMeters: nextStart.xMeters + (nextEnd.xMeters - nextStart.xMeters) * ratio, yMeters: nextStart.yMeters + (nextEnd.yMeters - nextStart.yMeters) * ratio };
+  }
+
   private removeOpening(kind: OpeningKind, id: string): void {
     const openings = kind === 'door' ? this.room.doors : this.room.windows;
     const opening = openings.find((candidate) => candidate.id === id);
@@ -1286,11 +1451,19 @@ export class FloorPlanEditor {
   }
 
   private commitAction(measurement?: Measurement): void {
-    this.syncSplitOpenings();
-    this.syncMountedObjects();
     if (measurement) this.room.measurements.push(measurement);
+    this.syncSplitOpenings();
+    this.syncMeasuredWallLocks();
+    this.syncMountedObjects();
     this.onChange(structuredClone(this.room), true);
     this.render();
+  }
+
+  private syncMeasuredWallLocks(): void {
+    const measuredWallIds = new Set(this.room.measurements.filter((measurement) => measurement.targetType === 'wall').map((measurement) => measurement.targetId));
+    for (const wall of this.room.walls) {
+      if (measuredWallIds.has(wall.id)) wall.locked = true;
+    }
   }
 
   private syncMountedObjects(): void {
@@ -1308,11 +1481,48 @@ export class FloorPlanEditor {
   }
 
   private syncSplitOpenings(): void {
-    for (const opening of [...this.room.doors, ...this.room.windows]) {
-      if (!opening.rightWallId) continue;
-      const leftWall = this.room.walls.find((wall) => wall.id === opening.wallId);
-      const rightWall = this.room.walls.find((wall) => wall.id === opening.rightWallId);
-      if (!leftWall || !rightWall) continue;
+    const openings = [...this.room.doors, ...this.room.windows]
+      .flatMap((opening) => {
+        if (!opening.rightWallId) return [];
+        const leftWall = this.room.walls.find((wall) => wall.id === opening.wallId);
+        const rightWall = this.room.walls.find((wall) => wall.id === opening.rightWallId);
+        return leftWall && rightWall ? [{ opening, leftWall, rightWall }] : [];
+      });
+    const nextOpeningByWall = new Map(openings.map((item) => [item.leftWall.id, item]));
+    const incomingWallIds = new Set(openings.map((item) => item.rightWall.id));
+    const starts = openings.filter((item) => !incomingWallIds.has(item.leftWall.id));
+
+    for (const start of starts) {
+      const chain = [start.leftWall];
+      const visited = new Set<string>([start.leftWall.id]);
+      let current = start;
+      while (!visited.has(current.rightWall.id)) {
+        chain.push(current.rightWall);
+        visited.add(current.rightWall.id);
+        const next = nextOpeningByWall.get(current.rightWall.id);
+        if (!next) break;
+        current = next;
+      }
+      const first = chain[0].start;
+      const finalWall = chain.at(-1);
+      if (!finalWall) continue;
+      const last = finalWall.end;
+      const dx = last.xMeters - first.xMeters;
+      const dy = last.yMeters - first.yMeters;
+      const length = Math.hypot(dx, dy);
+      if (length <= 1e-9) continue;
+      const project = (point: Point): Point => {
+        const distance = Math.max(0, Math.min(length, ((point.xMeters - first.xMeters) * dx + (point.yMeters - first.yMeters) * dy) / length));
+        return { xMeters: first.xMeters + dx / length * distance, yMeters: first.yMeters + dy / length * distance };
+      };
+      for (const wall of chain) {
+        wall.start = project(wall.start);
+        wall.end = project(wall.end);
+        delete wall.lengthMeters;
+      }
+    }
+
+    for (const { opening, leftWall, rightWall } of openings) {
       opening.offsetMeters = distanceBetween(leftWall.start, leftWall.end);
       opening.widthMeters = distanceBetween(leftWall.end, rightWall.start);
     }
@@ -1627,6 +1837,7 @@ export class FloorPlanEditor {
       this.svg.append(polygon);
     }
     for (const wall of this.room.walls) this.svg.append(...this.buildWall(wall));
+    this.renderWallDimensions();
     const objects = [...this.room.objects].sort((first, second) => Number(this.canEditSelection({ type: 'object', id: first.id })) - Number(this.canEditSelection({ type: 'object', id: second.id })));
     for (const object of objects) this.svg.append(...this.buildObject(object));
     for (const door of this.room.doors) this.svg.append(this.buildOpening(door, 'door'));
@@ -1690,11 +1901,26 @@ export class FloorPlanEditor {
       item.dataset.wallId = wall.id;
       if (this.layer && this.layer !== 'builder') item.style.pointerEvents = 'none';
     }
-    const dimension = svgElement('text', 'editor-dimension');
-    dimension.setAttribute('x', String((wall.start.xMeters + wall.end.xMeters) / 2));
-    dimension.setAttribute('y', String((wall.start.yMeters + wall.end.yMeters) / 2 - 0.18));
-    dimension.textContent = formatLength(distanceBetween(wall.start, wall.end), this.units);
-    if (this.layer && this.layer !== 'builder') dimension.style.pointerEvents = 'none';
+    const elements: SVGElement[] = [hit, line];
+    if (wall.locked) {
+      const lock = svgElement('g', 'editor-wall-lock');
+      lock.dataset.wallLock = wall.id;
+      lock.setAttribute('aria-label', 'Measured wall locked');
+      const x = (wall.start.xMeters + wall.end.xMeters) / 2 + 0.22;
+      const y = (wall.start.yMeters + wall.end.yMeters) / 2 - 0.2;
+      const shackle = svgElement('path', 'editor-wall-lock-shackle');
+      shackle.setAttribute('d', `M ${x + 0.025} ${y} v -0.035 a 0.035 0.035 0 0 1 0.07 0 v 0.035`);
+      shackle.setAttribute('fill', 'none');
+      const body = svgElement('rect', 'editor-wall-lock-body');
+      body.setAttribute('x', String(x));
+      body.setAttribute('y', String(y));
+      body.setAttribute('width', '0.12');
+      body.setAttribute('height', '0.09');
+      const title = svgElement('title', 'editor-wall-lock-title');
+      title.textContent = 'Measured wall locked';
+      lock.append(shackle, body, title);
+      elements.push(lock);
+    }
     if (this.selection?.type === 'wall' && this.selection.id === wall.id) {
       line.classList.add('is-selected');
       const startMarker = this.pointMarker(wall.start);
@@ -1703,9 +1929,171 @@ export class FloorPlanEditor {
         marker.dataset.wallId = wall.id;
         marker.dataset.endpoint = endpoint;
       }
-      return [hit, line, dimension, startMarker, endMarker];
+      return [...elements, startMarker, endMarker];
     }
-    return [hit, line, dimension];
+    return elements;
+  }
+
+  private renderWallDimensions(): void {
+    const openings = [...this.room.doors, ...this.room.windows].flatMap((opening) => {
+      if (!opening.rightWallId) return [];
+      const leftWall = this.room.walls.find((wall) => wall.id === opening.wallId);
+      const rightWall = this.room.walls.find((wall) => wall.id === opening.rightWallId);
+      return leftWall && rightWall ? [{ opening, leftWall, rightWall }] : [];
+    });
+    const nextOpeningByWall = new Map(openings.map((item) => [item.leftWall.id, item]));
+    const incomingWallIds = new Set(openings.map((item) => item.rightWall.id));
+    const dimensionedWallIds = new Set<string>();
+
+    for (const firstOpening of openings.filter((item) => !incomingWallIds.has(item.leftWall.id))) {
+      const chain = [firstOpening.leftWall];
+      const chainOpenings: Array<(typeof openings)[number]> = [];
+      const visited = new Set([firstOpening.leftWall.id]);
+      let current = firstOpening;
+      while (!visited.has(current.rightWall.id)) {
+        chain.push(current.rightWall);
+        chainOpenings.push(current);
+        visited.add(current.rightWall.id);
+        const next = nextOpeningByWall.get(current.rightWall.id);
+        if (!next) break;
+        current = next;
+      }
+      const start = chain[0].start;
+      const finalWall = chain.at(-1);
+      if (!finalWall) continue;
+      const end = finalWall.end;
+      const normal = this.outwardDimensionNormal(start, end);
+      const dimensions = svgElement('g', 'editor-wall-dimensions');
+      dimensions.dataset.wallId = chain[0].id;
+      const overall = this.buildDimensionLine(start, end, normal, 0.82, 'overall');
+      overall.dataset.dimensionOpeningId = firstOpening.opening.id;
+      dimensions.append(overall);
+      chain.forEach((wall, index) => {
+        dimensionedWallIds.add(wall.id);
+        const part = index === 0 ? 'left' : index === chain.length - 1 ? 'right' : 'wall';
+        const segment = this.buildDimensionLine(wall.start, wall.end, normal, 0.38, part);
+        segment.dataset.dimensionWallId = wall.id;
+        dimensions.append(segment);
+        const opening = chainOpenings[index];
+        if (opening) {
+          const openingPart = opening.opening.id;
+          const openingGroup = this.buildDimensionLine(wall.end, opening.rightWall.start, normal, 0.38, this.room.doors.some((door) => door.id === openingPart) ? 'door' : 'window');
+          openingGroup.dataset.dimensionOpeningId = openingPart;
+          dimensions.append(openingGroup);
+        }
+      });
+      this.svg.append(dimensions);
+    }
+
+    const overlayByWall = new Map<string, Array<Door | Window>>();
+    for (const opening of [...this.room.doors, ...this.room.windows].filter((candidate) => !candidate.rightWallId)) {
+      const wallOpenings = overlayByWall.get(opening.wallId) ?? [];
+      wallOpenings.push(opening);
+      overlayByWall.set(opening.wallId, wallOpenings);
+    }
+    for (const [wallId, wallOpenings] of overlayByWall) {
+      const wall = this.room.walls.find((candidate) => candidate.id === wallId);
+      if (!wall || dimensionedWallIds.has(wall.id)) continue;
+      dimensionedWallIds.add(wall.id);
+      const length = distanceBetween(wall.start, wall.end);
+      if (length <= 1e-9) continue;
+      const axis = { xMeters: (wall.end.xMeters - wall.start.xMeters) / length, yMeters: (wall.end.yMeters - wall.start.yMeters) / length };
+      const pointAt = (distance: number): Point => ({ xMeters: wall.start.xMeters + axis.xMeters * distance, yMeters: wall.start.yMeters + axis.yMeters * distance });
+      const normal = this.outwardDimensionNormal(wall.start, wall.end);
+      const dimensions = svgElement('g', 'editor-wall-dimensions');
+      dimensions.dataset.wallId = wall.id;
+      const overall = this.buildDimensionLine(wall.start, wall.end, normal, 0.82, 'overall');
+      overall.dataset.dimensionOpeningId = wallOpenings[0].id;
+      dimensions.append(overall);
+      let cursor = 0;
+      const sortedOpenings = [...wallOpenings].sort((left, right) => left.offsetMeters - right.offsetMeters);
+      sortedOpenings.forEach((opening, index) => {
+        const openingStart = Math.max(cursor, Math.min(length, opening.offsetMeters));
+        const openingEnd = Math.max(openingStart, Math.min(length, opening.offsetMeters + opening.widthMeters));
+        if (openingStart > cursor) {
+          const segment = this.buildDimensionLine(pointAt(cursor), pointAt(openingStart), normal, 0.38, index === 0 ? 'left' : 'wall');
+          segment.dataset.dimensionWallId = wall.id;
+          dimensions.append(segment);
+        }
+        const openingGroup = this.buildDimensionLine(pointAt(openingStart), pointAt(openingEnd), normal, 0.38, this.room.doors.some((door) => door.id === opening.id) ? 'door' : 'window');
+        openingGroup.dataset.dimensionOpeningId = opening.id;
+        dimensions.append(openingGroup);
+        cursor = openingEnd;
+      });
+      if (cursor < length) {
+        const segment = this.buildDimensionLine(pointAt(cursor), wall.end, normal, 0.38, 'right');
+        segment.dataset.dimensionWallId = wall.id;
+        dimensions.append(segment);
+      }
+      this.svg.append(dimensions);
+    }
+
+    for (const wall of this.room.walls) {
+      if (dimensionedWallIds.has(wall.id)) continue;
+      const normal = this.outwardDimensionNormal(wall.start, wall.end);
+      const dimensions = svgElement('g', 'editor-wall-dimensions');
+      dimensions.dataset.wallId = wall.id;
+      const overall = this.buildDimensionLine(wall.start, wall.end, normal, 0.38, 'overall');
+      overall.dataset.dimensionWallId = wall.id;
+      dimensions.append(overall);
+      this.svg.append(dimensions);
+    }
+  }
+
+  private outwardDimensionNormal(start: Point, end: Point): Point {
+    const length = distanceBetween(start, end) || 1;
+    let normal = { xMeters: -(end.yMeters - start.yMeters) / length, yMeters: (end.xMeters - start.xMeters) / length };
+    if (this.room.points.length) {
+      const center = this.room.points.reduce((sum, point) => ({ xMeters: sum.xMeters + point.xMeters / this.room.points.length, yMeters: sum.yMeters + point.yMeters / this.room.points.length }), { xMeters: 0, yMeters: 0 });
+      const midpoint = { xMeters: (start.xMeters + end.xMeters) / 2, yMeters: (start.yMeters + end.yMeters) / 2 };
+      const towardCenter = (center.xMeters - midpoint.xMeters) * normal.xMeters + (center.yMeters - midpoint.yMeters) * normal.yMeters;
+      if (towardCenter > 0) normal = { xMeters: -normal.xMeters, yMeters: -normal.yMeters };
+    }
+    return normal;
+  }
+
+  private buildDimensionLine(start: Point, end: Point, normal: Point, offset: number, part: string): SVGGElement {
+    const length = distanceBetween(start, end);
+    const group = svgElement('g', 'editor-dimension-group');
+    group.dataset.dimensionPart = part;
+    group.dataset.valueMeters = String(length);
+    group.style.pointerEvents = 'all';
+    if (length <= 1e-9) return group;
+
+    const axis = { xMeters: (end.xMeters - start.xMeters) / length, yMeters: (end.yMeters - start.yMeters) / length };
+    const dimensionStart = { xMeters: start.xMeters + normal.xMeters * offset, yMeters: start.yMeters + normal.yMeters * offset };
+    const dimensionEnd = { xMeters: end.xMeters + normal.xMeters * offset, yMeters: end.yMeters + normal.yMeters * offset };
+    const addLine = (from: Point, to: Point, className: string) => {
+      const hit = svgElement('line', 'editor-dimension-hit');
+      hit.setAttribute('x1', String(from.xMeters));
+      hit.setAttribute('y1', String(from.yMeters));
+      hit.setAttribute('x2', String(to.xMeters));
+      hit.setAttribute('y2', String(to.yMeters));
+      group.append(hit);
+      const line = svgElement('line', className);
+      line.setAttribute('x1', String(from.xMeters));
+      line.setAttribute('y1', String(from.yMeters));
+      line.setAttribute('x2', String(to.xMeters));
+      line.setAttribute('y2', String(to.yMeters));
+      group.append(line);
+    };
+    addLine(start, dimensionStart, 'editor-dimension-extension');
+    addLine(end, dimensionEnd, 'editor-dimension-extension');
+    addLine(dimensionStart, dimensionEnd, 'editor-dimension-line');
+    const tick = 0.055;
+    addLine({ xMeters: dimensionStart.xMeters - normal.xMeters * tick, yMeters: dimensionStart.yMeters - normal.yMeters * tick }, { xMeters: dimensionStart.xMeters + normal.xMeters * tick, yMeters: dimensionStart.yMeters + normal.yMeters * tick }, 'editor-dimension-tick');
+    addLine({ xMeters: dimensionEnd.xMeters - normal.xMeters * tick, yMeters: dimensionEnd.yMeters - normal.yMeters * tick }, { xMeters: dimensionEnd.xMeters + normal.xMeters * tick, yMeters: dimensionEnd.yMeters + normal.yMeters * tick }, 'editor-dimension-tick');
+    const label = svgElement('text', 'editor-dimension');
+    const midpoint = { xMeters: (dimensionStart.xMeters + dimensionEnd.xMeters) / 2 + normal.xMeters * 0.07, yMeters: (dimensionStart.yMeters + dimensionEnd.yMeters) / 2 + normal.yMeters * 0.07 };
+    let angle = Math.atan2(axis.yMeters, axis.xMeters) * 180 / Math.PI;
+    if (angle > 90) angle -= 180;
+    if (angle < -90) angle += 180;
+    label.setAttribute('x', String(midpoint.xMeters));
+    label.setAttribute('y', String(midpoint.yMeters));
+    label.setAttribute('transform', `rotate(${angle} ${midpoint.xMeters} ${midpoint.yMeters})`);
+    label.textContent = formatLength(length, this.units);
+    group.append(label);
+    return group;
   }
 
   private buildObject(object: RoomObject): SVGElement[] {

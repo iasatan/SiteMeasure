@@ -254,6 +254,13 @@
   .editor-wall-hit { stroke: transparent; stroke-width: 0.7; }
   .editor-wall { stroke: var(--green); stroke-width: 0.1; stroke-linecap: square; }
   .editor-wall.is-selected { stroke: var(--accent); stroke-width: 0.14; }
+  .editor-wall-lock { fill: var(--green); stroke: var(--green); stroke-width: 0.012; pointer-events: none; }
+  .editor-wall-lock-shackle { stroke-width: 0.018; stroke-linecap: round; }
+  .editor-dimension-line, .editor-dimension-tick { stroke: #46534f; stroke-width: 1.25px; }
+  .editor-dimension-extension { stroke: #7d8985; stroke-width: 0.9px; }
+  .editor-dimension-line, .editor-dimension-tick, .editor-dimension-extension { vector-effect: non-scaling-stroke; }
+  .editor-dimension-group { cursor: pointer; }
+  .editor-dimension-hit { stroke: transparent; stroke-width: 16px; vector-effect: non-scaling-stroke; pointer-events: stroke; }
   .editor-object { fill: color-mix(in srgb, var(--accent) 12%, white); stroke: var(--green); stroke-width: 0.05; }
   .editor-object.is-selected { stroke: var(--accent); stroke-width: 0.1; }
   .editor-object-marker { stroke: var(--green); stroke-width: 10px; stroke-linecap: round; vector-effect: non-scaling-stroke; }

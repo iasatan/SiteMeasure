@@ -1,0 +1,1604 @@
+{
+  "format": "sitemeasure-project",
+  "formatVersion": 1,
+  "exportedAt": "2026-11-26T09:45:16.186Z",
+  "applicationVersion": "0.1.50",
+  "project": {
+    "schemaVersion": 1,
+    "id": "fb4c7031-16b3-4b71-8b7a-4ed4c371a018",
+    "name": "Otthon",
+    "projectNumber": "1",
+    "customer": "Sátán Ádám",
+    "address": "3526 Miskolc, Hatvanötösök Útja 1, 1/3",
+    "description": "",
+    "status": "active",
+    "tags": [],
+    "createdAt": "2026-11-24T16:45:18.690Z",
+    "modifiedAt": "2026-11-26T09:45:02.055Z",
+    "preferredUnits": "metric",
+    "buildings": [
+      {
+        "id": "c4ca1355-0088-40d7-8835-ca0170cc9649",
+        "name": "Building 1",
+        "floors": [
+          {
+            "id": "48c4a287-362e-4c88-8ffa-29c07370aff7",
+            "name": "Ground floor",
+            "level": 0,
+            "rooms": [
+              {
+                "id": "5635d500-d764-423d-a5ab-7480f50614ad",
+                "name": "Gardrob",
+                "points": [
+                  {
+                    "xMeters": 2.1,
+                    "yMeters": 3.2
+                  },
+                  {
+                    "xMeters": 3.027,
+                    "yMeters": 3.2
+                  },
+                  {
+                    "xMeters": 3.027,
+                    "yMeters": 3.983
+                  },
+                  {
+                    "xMeters": 3.9000000000000004,
+                    "yMeters": 3.983
+                  },
+                  {
+                    "xMeters": 3.9000000000000004,
+                    "yMeters": 5.313000000000001
+                  },
+                  {
+                    "xMeters": 2.1000000000000005,
+                    "yMeters": 5.313000000000001
+                  }
+                ],
+                "walls": [
+                  {
+                    "id": "ba6ca28e-3e57-43ee-8df9-d9268dc02644",
+                    "start": {
+                      "xMeters": 2.1,
+                      "yMeters": 3.2
+                    },
+                    "end": {
+                      "xMeters": 3.027,
+                      "yMeters": 3.2
+                    },
+                    "thicknessMeters": 0.15,
+                    "lengthMeters": 0.927
+                  },
+                  {
+                    "id": "18017a63-7178-4cfd-b14d-aef3b55a2def",
+                    "start": {
+                      "xMeters": 3.027,
+                      "yMeters": 3.2
+                    },
+                    "end": {
+                      "xMeters": 3.027,
+                      "yMeters": 3.983
+                    },
+                    "thicknessMeters": 0.15,
+                    "lengthMeters": 0.783
+                  },
+                  {
+                    "id": "de6aceb5-d3ec-42af-9a0b-3d7128ddcd2c",
+                    "start": {
+                      "xMeters": 3.027,
+                      "yMeters": 3.983
+                    },
+                    "end": {
+                      "xMeters": 3.9000000000000004,
+                      "yMeters": 3.983
+                    },
+                    "thicknessMeters": 0.15,
+                    "lengthMeters": 0.873
+                  },
+                  {
+                    "id": "b32e9918-bbc7-4c5b-b98c-2192b0be0481",
+                    "start": {
+                      "xMeters": 3.9000000000000004,
+                      "yMeters": 3.983
+                    },
+                    "end": {
+                      "xMeters": 3.9000000000000004,
+                      "yMeters": 5.313000000000001
+                    },
+                    "thicknessMeters": 0.15,
+                    "lengthMeters": 1.33
+                  },
+                  {
+                    "id": "380dd8a3-acb0-4a54-a41f-41f5f916bac8",
+                    "start": {
+                      "xMeters": 3.9000000000000004,
+                      "yMeters": 5.313000000000001
+                    },
+                    "end": {
+                      "xMeters": 2.1000000000000005,
+                      "yMeters": 5.313000000000001
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "e49eb94d-5084-40ac-b623-e339d96c7900",
+                    "start": {
+                      "xMeters": 2.1000000000000005,
+                      "yMeters": 5.313000000000001
+                    },
+                    "end": {
+                      "xMeters": 2.1,
+                      "yMeters": 3.2
+                    },
+                    "thicknessMeters": 0.15
+                  }
+                ],
+                "doors": [],
+                "windows": [],
+                "openings": [],
+                "objects": [
+                  {
+                    "id": "e5691c9f-44a1-49fd-a978-dc78006170bc",
+                    "name": "Socket",
+                    "layer": "technician",
+                    "widthMeters": 0.09,
+                    "depthMeters": 0.0475,
+                    "heightMeters": 0.08999999999999997,
+                    "xMeters": 2.1500000000000004,
+                    "yMeters": 4.7,
+                    "parts": [
+                      {
+                        "id": "d91ca5e3-ad2f-48b4-8549-dff97c4749e8",
+                        "shape": "box",
+                        "xMeters": 0,
+                        "yMeters": 0.3,
+                        "zMeters": 0,
+                        "widthMeters": 0.09,
+                        "heightMeters": 0.09,
+                        "depthMeters": 0.03,
+                        "color": "#e8e8e4"
+                      },
+                      {
+                        "id": "e37ec95e-e7d7-4f29-ae5b-ebba26027da1",
+                        "shape": "cylinder",
+                        "xMeters": 0,
+                        "yMeters": 0.3,
+                        "zMeters": 0.02,
+                        "widthMeters": 0.025,
+                        "heightMeters": 0.01,
+                        "depthMeters": 0.025,
+                        "color": "#3a3f44",
+                        "parentId": "d91ca5e3-ad2f-48b4-8549-dff97c4749e8"
+                      }
+                    ],
+                    "elevationMeters": 0.95,
+                    "rotationRadians": 1.5707963267948966
+                  }
+                ],
+                "measurements": [
+                  {
+                    "id": "484a7fc3-002c-4fc6-a17f-e8309129bc19",
+                    "targetType": "wall",
+                    "targetId": "ba6ca28e-3e57-43ee-8df9-d9268dc02644",
+                    "valueMeters": 0.927,
+                    "capturedAt": "2026-11-25T13:28:11.169Z",
+                    "source": "manual"
+                  },
+                  {
+                    "id": "02250645-4052-4cb2-8a30-a7ea3b933ee0",
+                    "targetType": "wall",
+                    "targetId": "18017a63-7178-4cfd-b14d-aef3b55a2def",
+                    "valueMeters": 0.783,
+                    "capturedAt": "2026-11-25T13:28:38.141Z",
+                    "source": "manual"
+                  },
+                  {
+                    "id": "dc65dba7-9474-4572-b2b3-f56eba7faa8a",
+                    "targetType": "wall",
+                    "targetId": "de6aceb5-d3ec-42af-9a0b-3d7128ddcd2c",
+                    "valueMeters": 0.873,
+                    "capturedAt": "2026-11-25T13:28:50.194Z",
+                    "source": "manual"
+                  },
+                  {
+                    "id": "0682a90b-8c49-45e8-b660-ee8c024da190",
+                    "targetType": "wall",
+                    "targetId": "b32e9918-bbc7-4c5b-b98c-2192b0be0481",
+                    "valueMeters": 1.33,
+                    "capturedAt": "2026-11-25T13:29:04.383Z",
+                    "source": "manual"
+                  }
+                ],
+                "photos": [],
+                "notes": []
+              },
+              {
+                "id": "4d32a73a-6e54-4740-ba8c-08f938b7efd3",
+                "name": "Kamra",
+                "points": [
+                  {
+                    "xMeters": 2.9000000000000004,
+                    "yMeters": 2
+                  },
+                  {
+                    "xMeters": 8.6,
+                    "yMeters": 2
+                  },
+                  {
+                    "xMeters": 8.6,
+                    "yMeters": 5.5
+                  },
+                  {
+                    "xMeters": 2.9000000000000004,
+                    "yMeters": 5.5
+                  }
+                ],
+                "walls": [
+                  {
+                    "id": "12b04bdc-2173-40a1-aeb8-06e744c11a44",
+                    "start": {
+                      "xMeters": 2.9000000000000004,
+                      "yMeters": 2
+                    },
+                    "end": {
+                      "xMeters": 7.228109741210937,
+                      "yMeters": 2
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "7cbbb07b-8156-4537-9f0e-73432417ceae",
+                    "start": {
+                      "xMeters": 8.428109741210937,
+                      "yMeters": 2
+                    },
+                    "end": {
+                      "xMeters": 8.6,
+                      "yMeters": 2
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "70fbe861-4518-4dc2-bd5b-89a2bea237a5",
+                    "start": {
+                      "xMeters": 8.6,
+                      "yMeters": 2
+                    },
+                    "end": {
+                      "xMeters": 8.6,
+                      "yMeters": 3.8194205284118654
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "cb1a41fa-e177-46a7-b234-281ea59f9ee1",
+                    "start": {
+                      "xMeters": 8.6,
+                      "yMeters": 4.419420528411865
+                    },
+                    "end": {
+                      "xMeters": 8.6,
+                      "yMeters": 5.5
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "d1751d64-6cda-48de-b240-c8e051c188dc",
+                    "start": {
+                      "xMeters": 8.6,
+                      "yMeters": 5.5
+                    },
+                    "end": {
+                      "xMeters": 2.9000000000000004,
+                      "yMeters": 5.5
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "04d231bd-d92b-4d47-a249-37f009e2e479",
+                    "start": {
+                      "xMeters": 2.9000000000000004,
+                      "yMeters": 5.5
+                    },
+                    "end": {
+                      "xMeters": 2.9000000000000004,
+                      "yMeters": 2
+                    },
+                    "thicknessMeters": 0.15
+                  }
+                ],
+                "doors": [
+                  {
+                    "id": "824a6a3e-a47e-45ec-8cc3-037896b2fd74",
+                    "wallId": "70fbe861-4518-4dc2-bd5b-89a2bea237a5",
+                    "offsetMeters": 1.8194205284118654,
+                    "widthMeters": 0.5999999999999996,
+                    "rightWallId": "cb1a41fa-e177-46a7-b234-281ea59f9ee1"
+                  }
+                ],
+                "windows": [
+                  {
+                    "id": "0ce00df6-26fd-49fc-8504-fd870825fbc7",
+                    "wallId": "12b04bdc-2173-40a1-aeb8-06e744c11a44",
+                    "offsetMeters": 4.328109741210937,
+                    "widthMeters": 1.2000000000000002,
+                    "rightWallId": "7cbbb07b-8156-4537-9f0e-73432417ceae"
+                  }
+                ],
+                "openings": [],
+                "objects": [],
+                "measurements": [],
+                "photos": [],
+                "notes": []
+              },
+              {
+                "id": "17866e0e-b666-4c53-b974-c6684c4ce7c5",
+                "name": "Konyha",
+                "points": [
+                  {
+                    "xMeters": 2.3000000000000003,
+                    "yMeters": 0.9
+                  },
+                  {
+                    "xMeters": 9.600000000000001,
+                    "yMeters": 0.9
+                  },
+                  {
+                    "xMeters": 9.600000000000001,
+                    "yMeters": 5.800000000000001
+                  },
+                  {
+                    "xMeters": 2.3000000000000007,
+                    "yMeters": 5.800000000000001
+                  }
+                ],
+                "walls": [
+                  {
+                    "id": "83a6d318-7f15-4389-b79c-b45d8f295745",
+                    "start": {
+                      "xMeters": 2.3000000000000003,
+                      "yMeters": 0.9
+                    },
+                    "end": {
+                      "xMeters": 5.752326393127441,
+                      "yMeters": 0.9
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "36405cf5-6a40-4ae4-85ec-9ae685fc2c7a",
+                    "start": {
+                      "xMeters": 6.952326393127441,
+                      "yMeters": 0.9
+                    },
+                    "end": {
+                      "xMeters": 9.600000000000001,
+                      "yMeters": 0.9
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "2e7278d4-9b37-4599-af06-7d37c99c17bf",
+                    "start": {
+                      "xMeters": 9.600000000000001,
+                      "yMeters": 0.9
+                    },
+                    "end": {
+                      "xMeters": 9.600000000000001,
+                      "yMeters": 1.9447767257690431
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "e0a29631-1997-4ad8-8c4d-5303bb95da02",
+                    "start": {
+                      "xMeters": 9.600000000000001,
+                      "yMeters": 2.544776725769043
+                    },
+                    "end": {
+                      "xMeters": 9.600000000000001,
+                      "yMeters": 5.800000000000001
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "37e591cf-c223-4520-abf4-47287c9411e7",
+                    "start": {
+                      "xMeters": 9.600000000000001,
+                      "yMeters": 5.800000000000001
+                    },
+                    "end": {
+                      "xMeters": 2.3000000000000007,
+                      "yMeters": 5.800000000000001
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "8b4c2b43-e81a-488c-8cc1-64b8168177fd",
+                    "start": {
+                      "xMeters": 2.3000000000000007,
+                      "yMeters": 5.800000000000001
+                    },
+                    "end": {
+                      "xMeters": 2.3000000000000003,
+                      "yMeters": 2.34534649848938
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "159b79e6-f5ab-4719-916f-45b37d67cf13",
+                    "start": {
+                      "xMeters": 2.3000000000000003,
+                      "yMeters": 1.74534649848938
+                    },
+                    "end": {
+                      "xMeters": 2.3,
+                      "yMeters": 0.9000000000000004
+                    },
+                    "thicknessMeters": 0.15
+                  }
+                ],
+                "doors": [
+                  {
+                    "id": "5dc2467a-d550-4c15-99cd-44c72a82abb9",
+                    "wallId": "8b4c2b43-e81a-488c-8cc1-64b8168177fd",
+                    "offsetMeters": 3.4546535015106206,
+                    "widthMeters": 0.6000000000000001,
+                    "rightWallId": "159b79e6-f5ab-4719-916f-45b37d67cf13"
+                  },
+                  {
+                    "id": "51c014f3-dd04-4684-b6fa-11e887b2681b",
+                    "wallId": "2e7278d4-9b37-4599-af06-7d37c99c17bf",
+                    "offsetMeters": 1.0447767257690432,
+                    "widthMeters": 0.5999999999999996,
+                    "rightWallId": "e0a29631-1997-4ad8-8c4d-5303bb95da02"
+                  }
+                ],
+                "windows": [
+                  {
+                    "id": "44029cdb-ecf0-4d5b-af97-92ce59799770",
+                    "wallId": "83a6d318-7f15-4389-b79c-b45d8f295745",
+                    "offsetMeters": 3.4523263931274406,
+                    "widthMeters": 1.2000000000000002,
+                    "rightWallId": "36405cf5-6a40-4ae4-85ec-9ae685fc2c7a"
+                  }
+                ],
+                "openings": [],
+                "objects": [],
+                "measurements": [],
+                "photos": [],
+                "notes": []
+              },
+              {
+                "id": "49d7b852-262d-4447-be85-eff2f48f081f",
+                "name": "Előszoba",
+                "points": [
+                  {
+                    "xMeters": 3.2,
+                    "yMeters": 1.1
+                  },
+                  {
+                    "xMeters": 7,
+                    "yMeters": 1.1
+                  },
+                  {
+                    "xMeters": 7,
+                    "yMeters": 7.199999999999999
+                  },
+                  {
+                    "xMeters": 3.2,
+                    "yMeters": 7.199999999999999
+                  }
+                ],
+                "walls": [
+                  {
+                    "id": "d8131a81-6d54-4852-a1d5-57efaade4c29",
+                    "start": {
+                      "xMeters": 3.2,
+                      "yMeters": 1.1
+                    },
+                    "end": {
+                      "xMeters": 4.696201038360596,
+                      "yMeters": 1.1
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "3ffcb5ab-3fac-4003-aa54-2d37afdd5d2c",
+                    "start": {
+                      "xMeters": 5.2962010383605955,
+                      "yMeters": 1.1
+                    },
+                    "end": {
+                      "xMeters": 7,
+                      "yMeters": 1.1
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "be378211-81ea-4839-9748-27360b3689ff",
+                    "start": {
+                      "xMeters": 7,
+                      "yMeters": 1.1
+                    },
+                    "end": {
+                      "xMeters": 7,
+                      "yMeters": 2.2372745990753176
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "1c056924-5144-4813-a98d-9b23f84b5c20",
+                    "start": {
+                      "xMeters": 7,
+                      "yMeters": 2.837274599075317
+                    },
+                    "end": {
+                      "xMeters": 7,
+                      "yMeters": 4.165099811553955
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "b5e8c81e-c1bd-481d-a8be-ca9efb735986",
+                    "start": {
+                      "xMeters": 7,
+                      "yMeters": 4.765099811553955
+                    },
+                    "end": {
+                      "xMeters": 7,
+                      "yMeters": 7.199999999999999
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "2c92c54a-3a45-4f53-a049-9eb48f2d77fa",
+                    "start": {
+                      "xMeters": 7,
+                      "yMeters": 7.199999999999999
+                    },
+                    "end": {
+                      "xMeters": 4.817568588256836,
+                      "yMeters": 7.199999999999999
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "8dfd205c-95bf-4fcd-aa8b-97b72f82b413",
+                    "start": {
+                      "xMeters": 4.217568588256835,
+                      "yMeters": 7.199999999999999
+                    },
+                    "end": {
+                      "xMeters": 3.2,
+                      "yMeters": 7.2
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "d04c9c8f-61e8-4ef4-8748-224a87d4166c",
+                    "start": {
+                      "xMeters": 3.2,
+                      "yMeters": 7.199999999999999
+                    },
+                    "end": {
+                      "xMeters": 3.2000000000000006,
+                      "yMeters": 2.9303417682647694
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "ec16962b-19d7-4567-b814-21ac7a96bf57",
+                    "start": {
+                      "xMeters": 3.2000000000000006,
+                      "yMeters": 2.33034176826477
+                    },
+                    "end": {
+                      "xMeters": 3.2000000000000006,
+                      "yMeters": 1.0999999999999996
+                    },
+                    "thicknessMeters": 0.15
+                  }
+                ],
+                "doors": [
+                  {
+                    "id": "1b9a04e3-6a5b-44bf-a7d0-e7d56cf013e7",
+                    "wallId": "d8131a81-6d54-4852-a1d5-57efaade4c29",
+                    "offsetMeters": 1.4962010383605957,
+                    "widthMeters": 0.5999999999999996,
+                    "rightWallId": "3ffcb5ab-3fac-4003-aa54-2d37afdd5d2c"
+                  },
+                  {
+                    "id": "33fefb8d-7ebd-44b2-921a-1f48e83c4875",
+                    "wallId": "d04c9c8f-61e8-4ef4-8748-224a87d4166c",
+                    "offsetMeters": 4.26965823173523,
+                    "widthMeters": 0.5999999999999996,
+                    "rightWallId": "ec16962b-19d7-4567-b814-21ac7a96bf57"
+                  },
+                  {
+                    "id": "74cf5c6e-f1b3-4fe1-bac5-189a7df45796",
+                    "wallId": "be378211-81ea-4839-9748-27360b3689ff",
+                    "offsetMeters": 1.1372745990753175,
+                    "widthMeters": 0.5999999999999996,
+                    "rightWallId": "1c056924-5144-4813-a98d-9b23f84b5c20"
+                  },
+                  {
+                    "id": "dc4005c2-5141-465d-9a82-33133c24612e",
+                    "wallId": "1c056924-5144-4813-a98d-9b23f84b5c20",
+                    "offsetMeters": 1.327825212478638,
+                    "widthMeters": 0.5999999999999996,
+                    "rightWallId": "b5e8c81e-c1bd-481d-a8be-ca9efb735986"
+                  },
+                  {
+                    "id": "96be1f9e-f8cd-4c9f-a4c8-907be449700d",
+                    "wallId": "2c92c54a-3a45-4f53-a049-9eb48f2d77fa",
+                    "offsetMeters": 2.1824314117431642,
+                    "widthMeters": 0.6000000000000005,
+                    "rightWallId": "8dfd205c-95bf-4fcd-aa8b-97b72f82b413"
+                  }
+                ],
+                "windows": [],
+                "openings": [],
+                "objects": [],
+                "measurements": [],
+                "photos": [],
+                "notes": []
+              },
+              {
+                "id": "5fab5cb1-7315-4c19-a7a5-258a19a70aec",
+                "name": "Wc",
+                "points": [
+                  {
+                    "xMeters": 2.5999999999999996,
+                    "yMeters": 4.5
+                  },
+                  {
+                    "xMeters": 7.5,
+                    "yMeters": 1.6
+                  },
+                  {
+                    "xMeters": 7.5,
+                    "yMeters": 5.5
+                  },
+                  {
+                    "xMeters": 2.5999999999999996,
+                    "yMeters": 5.5
+                  }
+                ],
+                "walls": [
+                  {
+                    "id": "25421f7f-7ced-496b-b8af-3c2e88aadeb3",
+                    "start": {
+                      "xMeters": 2.5999999999999996,
+                      "yMeters": 4.5
+                    },
+                    "end": {
+                      "xMeters": 2.996,
+                      "yMeters": 1.6
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "3da16c14-4225-47ff-b752-3b8a9a2417c9",
+                    "start": {
+                      "xMeters": 3.396,
+                      "yMeters": 1.6
+                    },
+                    "end": {
+                      "xMeters": 3.496,
+                      "yMeters": 1.6
+                    },
+                    "thicknessMeters": 0.15,
+                    "lengthMeters": 0.1
+                  },
+                  {
+                    "id": "4864552a-48ea-4fff-a153-98219d4e3e62",
+                    "start": {
+                      "xMeters": 7.5,
+                      "yMeters": 1.6
+                    },
+                    "end": {
+                      "xMeters": 7.5,
+                      "yMeters": 2.5100000000000002
+                    },
+                    "thicknessMeters": 0.15,
+                    "lengthMeters": 0.91
+                  },
+                  {
+                    "id": "0852affa-1375-4727-92b9-7732b6a4eb6a",
+                    "start": {
+                      "xMeters": 7.5,
+                      "yMeters": 5.5
+                    },
+                    "end": {
+                      "xMeters": 6.68249374628067,
+                      "yMeters": 5.5
+                    },
+                    "thicknessMeters": 0.15,
+                    "lengthMeters": 0.8175062537193298
+                  },
+                  {
+                    "id": "c4afe6b2-7f28-4184-aca9-3d2d49ce4a6c",
+                    "start": {
+                      "xMeters": 2.5999999999999996,
+                      "yMeters": 5.5
+                    },
+                    "end": {
+                      "xMeters": 2.5999999999999996,
+                      "yMeters": 5.4
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "e6268d0c-69f6-4d30-ae98-3e03f1ee2802",
+                    "start": {
+                      "xMeters": 2.5999999999999996,
+                      "yMeters": 4.703
+                    },
+                    "end": {
+                      "xMeters": 2.5999999999999996,
+                      "yMeters": 4.5
+                    },
+                    "thicknessMeters": 0.15
+                  }
+                ],
+                "doors": [
+                  {
+                    "id": "5b2c4b96-feee-43da-a86b-628e50171ec3",
+                    "wallId": "c4afe6b2-7f28-4184-aca9-3d2d49ce4a6c",
+                    "offsetMeters": 0.09999999999999964,
+                    "widthMeters": 0.6970000000000001,
+                    "rightWallId": "e6268d0c-69f6-4d30-ae98-3e03f1ee2802",
+                    "heightMeters": 2.1
+                  }
+                ],
+                "windows": [
+                  {
+                    "id": "c70ca814-1825-4ecb-a833-6cf78dce38e1",
+                    "wallId": "25421f7f-7ced-496b-b8af-3c2e88aadeb3",
+                    "offsetMeters": 2.9269123663000234,
+                    "widthMeters": 0.3999999999999999,
+                    "rightWallId": "3da16c14-4225-47ff-b752-3b8a9a2417c9",
+                    "heightMeters": 1.2
+                  }
+                ],
+                "openings": [],
+                "objects": [],
+                "measurements": [
+                  {
+                    "id": "56fb3e7c-5072-48c3-90d0-3a5f2c3d13c2",
+                    "targetType": "wall",
+                    "targetId": "25421f7f-7ced-496b-b8af-3c2e88aadeb3",
+                    "valueMeters": 0.3962745666503906,
+                    "capturedAt": "2026-11-26T07:42:50.391Z",
+                    "source": "bluetooth",
+                    "deviceName": "GLM100-36CG x3751"
+                  },
+                  {
+                    "id": "1f436796-3805-45e0-b277-4d668a85ef80",
+                    "targetType": "other",
+                    "targetId": "c70ca814-1825-4ecb-a833-6cf78dce38e1",
+                    "valueMeters": 0.5066609382629395,
+                    "capturedAt": "2026-11-26T07:43:04.910Z",
+                    "source": "bluetooth",
+                    "deviceName": "GLM100-36CG x3751"
+                  },
+                  {
+                    "id": "11b2d4d5-71cd-446d-8989-83c2076ddeab",
+                    "targetType": "wall",
+                    "targetId": "0852affa-1375-4727-92b9-7732b6a4eb6a",
+                    "valueMeters": 0.8175062537193298,
+                    "capturedAt": "2026-11-26T07:43:24.412Z",
+                    "source": "bluetooth",
+                    "deviceName": "GLM100-36CG x3751"
+                  },
+                  {
+                    "id": "5618074e-09a8-4017-8fb5-70f653980cc4",
+                    "targetType": "wall",
+                    "targetId": "3da16c14-4225-47ff-b752-3b8a9a2417c9",
+                    "valueMeters": 0.1,
+                    "capturedAt": "2026-11-26T07:44:03.451Z",
+                    "source": "manual"
+                  },
+                  {
+                    "id": "0366117e-d23f-4348-8b99-5002ee83e98b",
+                    "targetType": "wall",
+                    "targetId": "4864552a-48ea-4fff-a153-98219d4e3e62",
+                    "valueMeters": 0.912101149559021,
+                    "capturedAt": "2026-11-26T07:44:21.472Z",
+                    "source": "bluetooth",
+                    "deviceName": "GLM100-36CG x3751"
+                  },
+                  {
+                    "id": "230649db-5f6e-4a08-9f43-ad264ae7e9e3",
+                    "targetType": "wall",
+                    "targetId": "4864552a-48ea-4fff-a153-98219d4e3e62",
+                    "valueMeters": 0.91,
+                    "capturedAt": "2026-11-26T07:44:34.505Z",
+                    "source": "manual"
+                  },
+                  {
+                    "id": "7a4412fc-e742-4f94-ae09-0630c895d0f9",
+                    "targetType": "other",
+                    "targetId": "5b2c4b96-feee-43da-a86b-628e50171ec3",
+                    "valueMeters": 0.6969422101974487,
+                    "capturedAt": "2026-11-26T07:44:43.345Z",
+                    "source": "bluetooth",
+                    "deviceName": "GLM100-36CG x3751"
+                  },
+                  {
+                    "id": "fad44b41-23ea-40f2-9632-02ed2f5bfe18",
+                    "targetType": "other",
+                    "targetId": "5b2c4b96-feee-43da-a86b-628e50171ec3",
+                    "valueMeters": 0.9093219041824341,
+                    "capturedAt": "2026-11-26T07:45:02.873Z",
+                    "source": "bluetooth",
+                    "deviceName": "GLM100-36CG x3751"
+                  }
+                ],
+                "photos": [],
+                "notes": []
+              },
+              {
+                "id": "5b4c84dd-4453-446d-bf5b-05b5af4ce382",
+                "name": "Fürdő",
+                "points": [
+                  {
+                    "xMeters": 2.3000000000000003,
+                    "yMeters": 3.7
+                  },
+                  {
+                    "xMeters": 4.9,
+                    "yMeters": 3.7
+                  },
+                  {
+                    "xMeters": 4.9,
+                    "yMeters": 1.2000000000000002
+                  },
+                  {
+                    "xMeters": 8.200000000000001,
+                    "yMeters": 1.2000000000000002
+                  },
+                  {
+                    "xMeters": 8.200000000000001,
+                    "yMeters": 5.5
+                  },
+                  {
+                    "xMeters": 9.3,
+                    "yMeters": 5.5
+                  },
+                  {
+                    "xMeters": 9.3,
+                    "yMeters": 6.7
+                  },
+                  {
+                    "xMeters": 8.200000000000001,
+                    "yMeters": 6.7
+                  },
+                  {
+                    "xMeters": 8.200000000000001,
+                    "yMeters": 6.1000000000000005
+                  },
+                  {
+                    "xMeters": 2.3000000000000007,
+                    "yMeters": 6.1000000000000005
+                  }
+                ],
+                "walls": [
+                  {
+                    "id": "d0d41ca7-443a-461a-a1f5-cfbce87fc66c",
+                    "start": {
+                      "xMeters": 2.3000000000000003,
+                      "yMeters": 3.7
+                    },
+                    "end": {
+                      "xMeters": 4.9,
+                      "yMeters": 3.7
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "33e00dd3-908a-475a-bf2e-e594fd991cf5",
+                    "start": {
+                      "xMeters": 4.9,
+                      "yMeters": 3.7
+                    },
+                    "end": {
+                      "xMeters": 4.9,
+                      "yMeters": 1.2000000000000002
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "0c7dce6f-79c5-4a7f-a6c3-851e382267c5",
+                    "start": {
+                      "xMeters": 4.9,
+                      "yMeters": 1.2000000000000002
+                    },
+                    "end": {
+                      "xMeters": 5.313579940795899,
+                      "yMeters": 1.2000000000000002
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "88cdd639-df86-4078-8e1d-e5d5131ec968",
+                    "start": {
+                      "xMeters": 6.513579940795898,
+                      "yMeters": 1.2000000000000002
+                    },
+                    "end": {
+                      "xMeters": 8.200000000000001,
+                      "yMeters": 1.2000000000000002
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "4ea843aa-9b40-426f-b4bb-f21f26c46611",
+                    "start": {
+                      "xMeters": 8.200000000000001,
+                      "yMeters": 1.2000000000000002
+                    },
+                    "end": {
+                      "xMeters": 8.200000000000001,
+                      "yMeters": 5.5
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "b6963842-f6ee-43c7-9f23-6e042376481b",
+                    "start": {
+                      "xMeters": 8.200000000000001,
+                      "yMeters": 5.5
+                    },
+                    "end": {
+                      "xMeters": 9.3,
+                      "yMeters": 5.5
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "17f313f6-5c4f-462f-890c-c19e9d79d432",
+                    "start": {
+                      "xMeters": 9.3,
+                      "yMeters": 5.5
+                    },
+                    "end": {
+                      "xMeters": 9.3,
+                      "yMeters": 6.7
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "b800bfa5-f1be-4454-91f5-133c408bcea8",
+                    "start": {
+                      "xMeters": 9.3,
+                      "yMeters": 6.7
+                    },
+                    "end": {
+                      "xMeters": 8.200000000000001,
+                      "yMeters": 6.7
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "c4afde34-9cf9-4806-b853-605649a6ee5b",
+                    "start": {
+                      "xMeters": 8.200000000000001,
+                      "yMeters": 6.7
+                    },
+                    "end": {
+                      "xMeters": 8.200000000000001,
+                      "yMeters": 6.1000000000000005
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "631d8927-bc22-4562-9b4b-3ecd6c6609d9",
+                    "start": {
+                      "xMeters": 8.200000000000001,
+                      "yMeters": 6.1000000000000005
+                    },
+                    "end": {
+                      "xMeters": 2.3000000000000007,
+                      "yMeters": 6.1000000000000005
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "97d647f2-c09b-494f-aaec-fc1244b23d18",
+                    "start": {
+                      "xMeters": 2.3000000000000007,
+                      "yMeters": 6.1000000000000005
+                    },
+                    "end": {
+                      "xMeters": 2.3000000000000003,
+                      "yMeters": 4.672031688690185
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "a79a0f9e-9bfb-47b5-b8a3-f9063bed7f6a",
+                    "start": {
+                      "xMeters": 2.3000000000000003,
+                      "yMeters": 4.072031688690186
+                    },
+                    "end": {
+                      "xMeters": 2.3000000000000003,
+                      "yMeters": 3.7
+                    },
+                    "thicknessMeters": 0.15
+                  }
+                ],
+                "doors": [
+                  {
+                    "id": "efebe045-2aab-4584-8b88-8d000f06a5be",
+                    "wallId": "97d647f2-c09b-494f-aaec-fc1244b23d18",
+                    "offsetMeters": 1.4279683113098152,
+                    "widthMeters": 0.5999999999999996,
+                    "rightWallId": "a79a0f9e-9bfb-47b5-b8a3-f9063bed7f6a"
+                  }
+                ],
+                "windows": [
+                  {
+                    "id": "8a098f3e-417b-443e-a043-26e82f339289",
+                    "wallId": "0c7dce6f-79c5-4a7f-a6c3-851e382267c5",
+                    "offsetMeters": 0.41357994079589844,
+                    "widthMeters": 1.1999999999999993,
+                    "rightWallId": "88cdd639-df86-4078-8e1d-e5d5131ec968"
+                  }
+                ],
+                "openings": [],
+                "objects": [],
+                "measurements": [],
+                "photos": [],
+                "notes": []
+              },
+              {
+                "id": "fdd85609-4e6f-4ed5-8b63-3a7002717d8d",
+                "name": "Gyerekszoba",
+                "points": [
+                  {
+                    "xMeters": 2.8000000000000003,
+                    "yMeters": 2.2
+                  },
+                  {
+                    "xMeters": 8.4,
+                    "yMeters": 2.2
+                  },
+                  {
+                    "xMeters": 8.4,
+                    "yMeters": 7.300000000000001
+                  },
+                  {
+                    "xMeters": 2.8000000000000007,
+                    "yMeters": 7.300000000000001
+                  }
+                ],
+                "walls": [
+                  {
+                    "id": "8e241734-c546-4dbd-9930-bb9cdb589d5a",
+                    "start": {
+                      "xMeters": 2.8000000000000003,
+                      "yMeters": 2.2
+                    },
+                    "end": {
+                      "xMeters": 8.4,
+                      "yMeters": 2.2
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "c241f154-5bf6-47ff-8864-913344678402",
+                    "start": {
+                      "xMeters": 8.4,
+                      "yMeters": 2.2
+                    },
+                    "end": {
+                      "xMeters": 8.4,
+                      "yMeters": 7.300000000000001
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "cddfb864-e4c3-4e96-9b9d-858200991d38",
+                    "start": {
+                      "xMeters": 8.4,
+                      "yMeters": 7.300000000000001
+                    },
+                    "end": {
+                      "xMeters": 6.526875591278076,
+                      "yMeters": 7.300000000000001
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "f58c10de-390b-4545-80b8-a19893e1ba1c",
+                    "start": {
+                      "xMeters": 5.3268755912780765,
+                      "yMeters": 7.300000000000001
+                    },
+                    "end": {
+                      "xMeters": 2.8000000000000007,
+                      "yMeters": 7.300000000000002
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "531f6807-45c5-4fd2-9398-3fa48dd64085",
+                    "start": {
+                      "xMeters": 2.8000000000000007,
+                      "yMeters": 7.300000000000001
+                    },
+                    "end": {
+                      "xMeters": 2.8000000000000003,
+                      "yMeters": 3.927492904663086
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "471babf1-8ffe-4360-9e1f-1dbe7dcb2869",
+                    "start": {
+                      "xMeters": 2.8000000000000003,
+                      "yMeters": 3.327492904663086
+                    },
+                    "end": {
+                      "xMeters": 2.8,
+                      "yMeters": 2.2
+                    },
+                    "thicknessMeters": 0.15
+                  }
+                ],
+                "doors": [
+                  {
+                    "id": "d78a34e3-0c2a-4a54-98fa-df0348dcf151",
+                    "wallId": "531f6807-45c5-4fd2-9398-3fa48dd64085",
+                    "offsetMeters": 3.3725070953369145,
+                    "widthMeters": 0.6000000000000001,
+                    "rightWallId": "471babf1-8ffe-4360-9e1f-1dbe7dcb2869"
+                  }
+                ],
+                "windows": [
+                  {
+                    "id": "1a10b458-97e0-49c9-b46d-0fe4e929612b",
+                    "wallId": "cddfb864-e4c3-4e96-9b9d-858200991d38",
+                    "offsetMeters": 1.8731244087219245,
+                    "widthMeters": 1.1999999999999993,
+                    "rightWallId": "f58c10de-390b-4545-80b8-a19893e1ba1c"
+                  }
+                ],
+                "openings": [],
+                "objects": [],
+                "measurements": [],
+                "photos": [],
+                "notes": []
+              },
+              {
+                "id": "7a70c2ff-9783-47cf-97f8-311acd49d723",
+                "name": "Nappali",
+                "points": [
+                  {
+                    "xMeters": 3.5,
+                    "yMeters": 2.7
+                  },
+                  {
+                    "xMeters": 7.800000000000001,
+                    "yMeters": 2.7
+                  },
+                  {
+                    "xMeters": 7.800000000000001,
+                    "yMeters": 6.5
+                  },
+                  {
+                    "xMeters": 3.5,
+                    "yMeters": 6.5
+                  }
+                ],
+                "walls": [
+                  {
+                    "id": "73446461-dcfb-4d79-8e5e-c6b42fd96952",
+                    "start": {
+                      "xMeters": 3.5,
+                      "yMeters": 2.7
+                    },
+                    "end": {
+                      "xMeters": 5.852896404266358,
+                      "yMeters": 2.7
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "527dc212-11a3-4885-a8c8-d0dedcf14f95",
+                    "start": {
+                      "xMeters": 6.452896404266358,
+                      "yMeters": 2.7
+                    },
+                    "end": {
+                      "xMeters": 7.800000000000001,
+                      "yMeters": 2.7
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "7b4c9adb-6dd5-4303-b06f-e809b2766f20",
+                    "start": {
+                      "xMeters": 7.800000000000001,
+                      "yMeters": 2.7
+                    },
+                    "end": {
+                      "xMeters": 7.800000000000001,
+                      "yMeters": 3.859306526184082
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "0bb77b73-ec98-40e9-bb8b-7aa3ec3a1cff",
+                    "start": {
+                      "xMeters": 7.800000000000001,
+                      "yMeters": 4.459306526184082
+                    },
+                    "end": {
+                      "xMeters": 7.800000000000001,
+                      "yMeters": 6.5
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "39b327dd-8d2d-4c42-bf1c-358693170723",
+                    "start": {
+                      "xMeters": 7.800000000000001,
+                      "yMeters": 6.5
+                    },
+                    "end": {
+                      "xMeters": 6.526875591278076,
+                      "yMeters": 6.5
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "850c5510-e0eb-4e23-8964-1f6235c8f8b0",
+                    "start": {
+                      "xMeters": 5.3268755912780765,
+                      "yMeters": 6.5
+                    },
+                    "end": {
+                      "xMeters": 3.5,
+                      "yMeters": 6.500000000000001
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "8e1333c7-e0ac-4ba3-8958-f7d2aab4f95d",
+                    "start": {
+                      "xMeters": 3.5,
+                      "yMeters": 6.5
+                    },
+                    "end": {
+                      "xMeters": 3.5,
+                      "yMeters": 4.552374172210693
+                    },
+                    "thicknessMeters": 0.15
+                  },
+                  {
+                    "id": "20cb6d4f-6dab-4b73-9ad5-e6011eb3adc0",
+                    "start": {
+                      "xMeters": 3.5,
+                      "yMeters": 3.9523741722106935
+                    },
+                    "end": {
+                      "xMeters": 3.5000000000000004,
+                      "yMeters": 2.7
+                    },
+                    "thicknessMeters": 0.15
+                  }
+                ],
+                "doors": [
+                  {
+                    "id": "b7b6bfe1-b2b8-4f80-b9a3-572e2db1d75f",
+                    "wallId": "8e1333c7-e0ac-4ba3-8958-f7d2aab4f95d",
+                    "offsetMeters": 1.9476258277893068,
+                    "widthMeters": 0.5999999999999996,
+                    "rightWallId": "20cb6d4f-6dab-4b73-9ad5-e6011eb3adc0"
+                  },
+                  {
+                    "id": "b4cb0b97-8561-44de-bdf3-c5875906a64a",
+                    "wallId": "73446461-dcfb-4d79-8e5e-c6b42fd96952",
+                    "offsetMeters": 2.3528964042663576,
+                    "widthMeters": 0.6000000000000005,
+                    "rightWallId": "527dc212-11a3-4885-a8c8-d0dedcf14f95"
+                  },
+                  {
+                    "id": "a25a77c3-df08-40ae-a3f3-d5138cd058cf",
+                    "wallId": "7b4c9adb-6dd5-4303-b06f-e809b2766f20",
+                    "offsetMeters": 1.159306526184082,
+                    "widthMeters": 0.5999999999999996,
+                    "rightWallId": "0bb77b73-ec98-40e9-bb8b-7aa3ec3a1cff"
+                  }
+                ],
+                "windows": [
+                  {
+                    "id": "ec3ae624-4281-47a5-8888-1e63c0ca413f",
+                    "wallId": "39b327dd-8d2d-4c42-bf1c-358693170723",
+                    "offsetMeters": 1.273124408721925,
+                    "widthMeters": 1.1999999999999993,
+                    "rightWallId": "850c5510-e0eb-4e23-8964-1f6235c8f8b0"
+                  }
+                ],
+                "openings": [],
+                "objects": [],
+                "measurements": [],
+                "photos": [],
+                "notes": []
+              },
+              {
+                "id": "c2ffffe0-4f23-4a89-98bf-41297e0b0536",
+                "name": "Hálószoba",
+                "points": [
+                  {
+                    "xMeters": 3.893152661865673,
+                    "yMeters": 2.658817512126249
+                  },
+                  {
+                    "xMeters": 7.119826984405518,
+                    "yMeters": 1.7000000000000002
+                  },
+                  {
+                    "xMeters": 9,
+                    "yMeters": 5.9147973537445075
+                  },
+                  {
+                    "xMeters": 5.322213228631261,
+                    "yMeters": 6.143998792094442
+                  }
+                ],
+                "walls": [
+                  {
+                    "id": "9254f7f6-d171-4c7d-aca2-51f3515b0181",
+                    "start": {
+                      "xMeters": 3.893152661865673,
+                      "yMeters": 2.658817512126249
+                    },
+                    "end": {
+                      "xMeters": 4.38726270198822,
+                      "yMeters": 1.7000000000000002
+                    },
+                    "thicknessMeters": 0.15,
+                    "lengthMeters": 0.8872627019882202
+                  },
+                  {
+                    "id": "a22d2c3e-491c-4627-ab56-f3904f4298b7",
+                    "start": {
+                      "xMeters": 5.460049271583557,
+                      "yMeters": 1.7000000000000002
+                    },
+                    "end": {
+                      "xMeters": 7.119826984405518,
+                      "yMeters": 1.7000000000000002
+                    },
+                    "thicknessMeters": 0.15,
+                    "lengthMeters": 1.8294718265533447
+                  },
+                  {
+                    "id": "e002a48a-de46-48a4-be78-bc245d5ff66d",
+                    "start": {
+                      "xMeters": 7.119826984405518,
+                      "yMeters": 1.7000000000000002
+                    },
+                    "end": {
+                      "xMeters": 9,
+                      "yMeters": 2.729325008392334
+                    },
+                    "thicknessMeters": 0.15,
+                    "lengthMeters": 1.029325008392334
+                  },
+                  {
+                    "id": "7e1e80c6-abfc-4c58-97a3-3080a4f08fec",
+                    "start": {
+                      "xMeters": 9,
+                      "yMeters": 3.8293250083923347
+                    },
+                    "end": {
+                      "xMeters": 9,
+                      "yMeters": 5.9147973537445075
+                    },
+                    "thicknessMeters": 0.15,
+                    "lengthMeters": 2.085472345352173
+                  },
+                  {
+                    "id": "c0eb82a1-47dd-437d-9a19-3d5413ee3a42",
+                    "start": {
+                      "xMeters": 9,
+                      "yMeters": 5.9147973537445075
+                    },
+                    "end": {
+                      "xMeters": 7.684523822110135,
+                      "yMeters": 6.248103121079268
+                    },
+                    "thicknessMeters": 0.15,
+                    "lengthMeters": 1.3570446968078613
+                  },
+                  {
+                    "id": "9ab2c398-978d-47b4-b203-9d05060fe4df",
+                    "start": {
+                      "xMeters": 6.475926435272041,
+                      "yMeters": 6.171857750543534
+                    },
+                    "end": {
+                      "xMeters": 5.322213228631261,
+                      "yMeters": 6.143998792094442
+                    },
+                    "thicknessMeters": 0.15,
+                    "lengthMeters": 1.1540495157241821
+                  },
+                  {
+                    "id": "b1414b67-458b-4a68-a071-cbf7ba64f8b9",
+                    "start": {
+                      "xMeters": 5.322213228631261,
+                      "yMeters": 6.143998792094442
+                    },
+                    "end": {
+                      "xMeters": 3.893152661865673,
+                      "yMeters": 2.658817512126249
+                    },
+                    "thicknessMeters": 0.15,
+                    "lengthMeters": 3.766789436340332
+                  }
+                ],
+                "doors": [
+                  {
+                    "id": "31139e11-e21a-4d0c-a04f-7ea436aa77ec",
+                    "wallId": "e002a48a-de46-48a4-be78-bc245d5ff66d",
+                    "offsetMeters": 2.1434926035495265,
+                    "widthMeters": 1.1000000000000005,
+                    "rightWallId": "7e1e80c6-abfc-4c58-97a3-3080a4f08fec",
+                    "heightMeters": 2.1
+                  },
+                  {
+                    "id": "7731ce73-051a-4b2b-956b-29f5c09605dc",
+                    "wallId": "9254f7f6-d171-4c7d-aca2-51f3515b0181",
+                    "offsetMeters": 1.0786453324934355,
+                    "widthMeters": 1.072786569595337,
+                    "rightWallId": "a22d2c3e-491c-4627-ab56-f3904f4298b7"
+                  }
+                ],
+                "windows": [
+                  {
+                    "id": "09b4955c-a2b8-47ca-ba12-3fa5dddfff2e",
+                    "wallId": "c0eb82a1-47dd-437d-9a19-3d5413ee3a42",
+                    "offsetMeters": 1.3570446968078616,
+                    "widthMeters": 1.2110000000000005,
+                    "rightWallId": "9ab2c398-978d-47b4-b203-9d05060fe4df",
+                    "heightMeters": 1.8
+                  }
+                ],
+                "openings": [],
+                "objects": [],
+                "measurements": [
+                  {
+                    "id": "29d9b17d-12ac-4d12-be01-cad00eb2038a",
+                    "targetType": "wall",
+                    "targetId": "7e1e80c6-abfc-4c58-97a3-3080a4f08fec",
+                    "valueMeters": 2.0859720706939697,
+                    "capturedAt": "2026-11-26T09:42:15.609Z",
+                    "source": "bluetooth",
+                    "deviceName": "GLM100-36CG x3751"
+                  },
+                  {
+                    "id": "b0ccc946-b6dc-45f3-b10c-eb8afd71f883",
+                    "targetType": "other",
+                    "targetId": "09b4955c-a2b8-47ca-ba12-3fa5dddfff2e",
+                    "valueMeters": 1.2105464935302734,
+                    "capturedAt": "2026-11-26T09:42:52.300Z",
+                    "source": "bluetooth",
+                    "deviceName": "GLM100-36CG x3751"
+                  },
+                  {
+                    "id": "315f3d27-5f2e-4fc7-9b96-3b002369ca3e",
+                    "targetType": "other",
+                    "targetId": "09b4955c-a2b8-47ca-ba12-3fa5dddfff2e",
+                    "valueMeters": 1.8509466648101807,
+                    "capturedAt": "2026-11-26T09:43:16.030Z",
+                    "source": "bluetooth",
+                    "deviceName": "GLM100-36CG x3751"
+                  },
+                  {
+                    "id": "844edc27-d485-46ae-8667-46b68aa643ba",
+                    "targetType": "other",
+                    "targetId": "09b4955c-a2b8-47ca-ba12-3fa5dddfff2e",
+                    "valueMeters": 2.406914472579956,
+                    "capturedAt": "2026-11-26T09:43:22.720Z",
+                    "source": "bluetooth",
+                    "deviceName": "GLM100-36CG x3751"
+                  },
+                  {
+                    "id": "75eddd4f-5aec-43da-be20-3b40ee426a39",
+                    "targetType": "wall",
+                    "targetId": "e002a48a-de46-48a4-be78-bc245d5ff66d",
+                    "valueMeters": 1.029325008392334,
+                    "capturedAt": "2026-11-26T09:43:51.671Z",
+                    "source": "bluetooth",
+                    "deviceName": "GLM100-36CG x3751"
+                  },
+                  {
+                    "id": "f496cdae-dc12-4d08-bbbe-e62f7755b021",
+                    "targetType": "wall",
+                    "targetId": "7e1e80c6-abfc-4c58-97a3-3080a4f08fec",
+                    "valueMeters": 2.085472345352173,
+                    "capturedAt": "2026-11-26T09:44:00.400Z",
+                    "source": "bluetooth",
+                    "deviceName": "GLM100-36CG x3751"
+                  },
+                  {
+                    "id": "142bbb04-e600-4352-84c5-59ef4d7192dc",
+                    "targetType": "wall",
+                    "targetId": "c0eb82a1-47dd-437d-9a19-3d5413ee3a42",
+                    "valueMeters": 1.3570446968078613,
+                    "capturedAt": "2026-11-26T09:44:12.312Z",
+                    "source": "bluetooth",
+                    "deviceName": "GLM100-36CG x3751"
+                  },
+                  {
+                    "id": "576c0f1e-63aa-4bd6-961a-abad2971aa9c",
+                    "targetType": "wall",
+                    "targetId": "9ab2c398-978d-47b4-b203-9d05060fe4df",
+                    "valueMeters": 1.1540495157241821,
+                    "capturedAt": "2026-11-26T09:44:20.111Z",
+                    "source": "bluetooth",
+                    "deviceName": "GLM100-36CG x3751"
+                  },
+                  {
+                    "id": "01ecc8be-1a36-46fb-a87b-684e5aa365a2",
+                    "targetType": "wall",
+                    "targetId": "a22d2c3e-491c-4627-ab56-f3904f4298b7",
+                    "valueMeters": 1.8262649774551392,
+                    "capturedAt": "2026-11-26T09:44:31.842Z",
+                    "source": "bluetooth",
+                    "deviceName": "GLM100-36CG x3751"
+                  },
+                  {
+                    "id": "9d4bcb29-650c-48f6-b598-85d71b61b0e5",
+                    "targetType": "other",
+                    "targetId": "7731ce73-051a-4b2b-956b-29f5c09605dc",
+                    "valueMeters": 1.072786569595337,
+                    "capturedAt": "2026-11-26T09:44:40.602Z",
+                    "source": "bluetooth",
+                    "deviceName": "GLM100-36CG x3751"
+                  },
+                  {
+                    "id": "cd5e14e1-1bc1-401c-881b-94a74f06ad88",
+                    "targetType": "wall",
+                    "targetId": "a22d2c3e-491c-4627-ab56-f3904f4298b7",
+                    "valueMeters": 1.8294718265533447,
+                    "capturedAt": "2026-11-26T09:44:45.551Z",
+                    "source": "bluetooth",
+                    "deviceName": "GLM100-36CG x3751"
+                  },
+                  {
+                    "id": "806b13fc-0bcf-4fd1-aa46-4a711f560451",
+                    "targetType": "wall",
+                    "targetId": "9254f7f6-d171-4c7d-aca2-51f3515b0181",
+                    "valueMeters": 0.8872627019882202,
+                    "capturedAt": "2026-11-26T09:44:51.402Z",
+                    "source": "bluetooth",
+                    "deviceName": "GLM100-36CG x3751"
+                  },
+                  {
+                    "id": "dc410915-d07f-455e-946d-4f9bd3248865",
+                    "targetType": "wall",
+                    "targetId": "b1414b67-458b-4a68-a071-cbf7ba64f8b9",
+                    "valueMeters": 3.766789436340332,
+                    "capturedAt": "2026-11-26T09:45:02.053Z",
+                    "source": "bluetooth",
+                    "deviceName": "GLM100-36CG x3751"
+                  }
+                ],
+                "photos": [],
+                "notes": []
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
