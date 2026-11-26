@@ -724,7 +724,7 @@ export class FloorPlanEditor {
     }
 
     const dimension = (event.target as Element).closest<SVGGElement>('[data-dimension-part]');
-    if (this.tool === 'select' && dimension) {
+    if ((this.tool === 'select' || this.tool === 'measure') && dimension) {
       this.editDimension(dimension);
       return;
     }
@@ -756,9 +756,9 @@ export class FloorPlanEditor {
     }
     const wallId = dimension.dataset.dimensionWallId;
     const wall = this.room.walls.find((candidate) => candidate.id === wallId);
-    if (!wall || wall.locked || !this.canEditSelection({ type: 'wall', id: wall.id })) return;
+    if (!wall || !this.canEditSelection({ type: 'wall', id: wall.id })) return;
     this.select({ type: 'wall', id: wall.id });
-    this.onMeasure?.(structuredClone(wall));
+    if (!wall.locked) this.onMeasure?.(structuredClone(wall));
   }
 
   private handleToolPointer(world: Point, target: SVGElement | null): boolean {
@@ -779,6 +779,13 @@ export class FloorPlanEditor {
   }
 
   private handleMeasurePointer(target: SVGElement | null): void {
+    if (target?.dataset.openingId && (target.dataset.openingType === 'door' || target.dataset.openingType === 'window')) {
+      const selection = { type: target.dataset.openingType, id: target.dataset.openingId } as const;
+      if (!this.canEditSelection(selection)) return;
+      this.select(selection);
+      this.onOpening?.(selection.type, selection.id);
+      return;
+    }
     if (target?.dataset.objectId) {
       if (!this.canEditSelection({ type: 'object', id: target.dataset.objectId })) return;
       this.select({ type: 'object', id: target.dataset.objectId });

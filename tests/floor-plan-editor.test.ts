@@ -840,6 +840,63 @@ describe('floor plan editor', () => {
     expect(calls).toContain(`door:${doorId}`);
   });
 
+  it('selects and highlights the matching wall section or opening in measure mode', () => {
+    const source = rectangleEditor();
+    source.selection = { type: 'wall', id: 'w0' };
+    source.addDoorToSelectedWall(1);
+    const door = source.room.doors[0];
+    const onSelection = vi.fn();
+    const onMeasure = vi.fn();
+    const onOpening = vi.fn();
+    const editor = new FloorPlanEditor({ room: source.room as never, units: 'metric', onChange: () => {}, onSelection, onMeasure, onOpening });
+    editor.setTool('measure');
+    const svg = editor.element.querySelector<SVGSVGElement>('svg')!;
+    Object.assign(svg, { createSVGPoint: () => ({ x: 0, y: 0 }), getScreenCTM: () => null });
+    const tap = (target: SVGElement) => {
+      const down = new MouseEvent('pointerdown', { button: 0, bubbles: true, cancelable: true });
+      Object.assign(down, { pointerId: 1, pointerType: 'mouse' });
+      target.dispatchEvent(down);
+      const up = new MouseEvent('pointerup', { button: 0, bubbles: true });
+      Object.assign(up, { pointerId: 1, pointerType: 'mouse' });
+      svg.dispatchEvent(up);
+    };
+
+    tap(editor.element.querySelector<SVGElement>(`[data-dimension-wall-id="${door.rightWallId}"] .editor-dimension-line`)!);
+    expect(onSelection).toHaveBeenLastCalledWith({ type: 'wall', id: door.rightWallId });
+    expect(editor.element.querySelector(`.editor-wall.is-selected[data-wall-id="${door.rightWallId}"]`)).not.toBeNull();
+    expect(onMeasure).toHaveBeenLastCalledWith(expect.objectContaining({ id: door.rightWallId }));
+
+    tap(editor.element.querySelector<SVGElement>('[data-dimension-part="door"] .editor-dimension-line')!);
+    expect(onSelection).toHaveBeenLastCalledWith({ type: 'door', id: door.id });
+    expect(editor.element.querySelector(`.editor-opening.is-selected[data-opening-id="${door.id}"]`)).not.toBeNull();
+    expect(onOpening).toHaveBeenLastCalledWith('door', door.id);
+
+    tap(editor.element.querySelector<SVGElement>(`.editor-opening[data-opening-id="${door.id}"]`)!);
+    expect(onOpening).toHaveBeenCalledTimes(2);
+  });
+
+  it('selects a locked wall from its dimension without opening the measurement dialog', () => {
+    const room = createRoom();
+    room.walls = [{ id: 'locked', start: { xMeters: 0, yMeters: 0 }, end: { xMeters: 2, yMeters: 0 }, thicknessMeters: 0.15, locked: true }];
+    const onSelection = vi.fn();
+    const onMeasure = vi.fn();
+    const editor = new FloorPlanEditor({ room, layer: 'builder', units: 'metric', onChange: () => {}, onSelection, onMeasure });
+    const svg = editor.element.querySelector<SVGSVGElement>('svg')!;
+    Object.assign(svg, { createSVGPoint: () => ({ x: 0, y: 0 }), getScreenCTM: () => null });
+    for (const tool of ['select', 'measure'] as const) {
+      editor.setTool(tool);
+      const down = new MouseEvent('pointerdown', { button: 0, bubbles: true, cancelable: true });
+      Object.assign(down, { pointerId: 1, pointerType: 'mouse' });
+      editor.element.querySelector<SVGElement>('[data-dimension-wall-id="locked"] .editor-dimension-line')!.dispatchEvent(down);
+      expect(onSelection).toHaveBeenLastCalledWith({ type: 'wall', id: 'locked' });
+      expect(editor.element.querySelector('.editor-wall.is-selected[data-wall-id="locked"]')).not.toBeNull();
+      const up = new MouseEvent('pointerup', { button: 0, bubbles: true });
+      Object.assign(up, { pointerId: 1, pointerType: 'mouse' });
+      svg.dispatchEvent(up);
+    }
+    expect(onMeasure).not.toHaveBeenCalled();
+  });
+
   it('uses a 60 cm default for doors added from either wall action or drawing tool', () => {
     const selectedWallEditor = rectangleEditor();
     selectedWallEditor.selection = { type: 'wall', id: 'w0' };
