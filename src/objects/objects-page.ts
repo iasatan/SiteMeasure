@@ -30,6 +30,8 @@ export interface ObjectsPageHost {
   confirm(message: string, onConfirm: () => void): void;
 }
 
+const PUBLISH_REPOSITORY_URL = 'https://github.com/iasatan/SiteMeasure';
+
 type DimensionKey = 'xMeters' | 'yMeters' | 'zMeters' | 'widthMeters' | 'heightMeters' | 'depthMeters';
 
 const DIMENSION_FIELDS: Array<{ key: DimensionKey; label: string; size: boolean }> = [
@@ -251,6 +253,7 @@ export class ObjectsPage {
     actions.append(
       btn('Save by name', 'button primary', () => this.saveDraft()),
       btn('Export file', 'button quiet', () => this.exportObjects([this.draft])),
+      btn('Publish', 'button quiet', () => this.publishDraft()),
     );
     section.append(error, actions);
     return section;
@@ -391,6 +394,32 @@ export class ObjectsPage {
       this.message = error instanceof Error ? error.message : 'The object could not be saved.';
     }
     this.rerender();
+  }
+
+  /** Opens GitHub's "propose new file" page, which creates a branch and pull request (via a fork when needed). */
+  private publishDraft(): void {
+    if (!this.draft.name.trim()) {
+      this.message = 'Enter a name for the object.';
+      this.rerender();
+      return;
+    }
+    try {
+      const object = { ...this.draft, name: this.draft.name.trim() };
+      const params = new URLSearchParams({
+        filename: `objects/${objectFilename([object])}`,
+        value: serializeObjects([object]),
+        message: `Add object: ${object.name}`,
+      });
+      const url = `${PUBLISH_REPOSITORY_URL}/new/main?${params}`;
+      if (url.length > 8000) {
+        this.host.toast('This object is too large to publish directly. Export the file and add it to the repository manually.');
+        return;
+      }
+      window.open(url, '_blank', 'noopener');
+      this.host.toast('Opening GitHub. Choose "Propose new file", then "Create pull request".');
+    } catch (error) {
+      this.host.toast(error instanceof Error ? error.message : 'Publish failed.');
+    }
   }
 
   private exportObjects(objects: ObjectDefinition[]): void {
