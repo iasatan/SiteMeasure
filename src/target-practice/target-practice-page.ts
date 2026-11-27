@@ -2,7 +2,8 @@ import { BoschLaserMeasureAdapter } from '../bluetooth/bosch-laser-measure-adapt
 import { loadCustomBoschProfile } from '../bluetooth/custom-bosch-profile';
 import { selectBluetoothProvider } from '../bluetooth/providers/select-bluetooth-provider';
 import type { BluetoothConnectionState, LaserMeasureAdapter, ParsedMeasurement } from '../bluetooth/types';
-import { advanceTargetTurn, createTargetGame, recordTargetAttempt } from './target-game';
+import { advanceTargetTurn, createTargetGame, recordTargetAttempt, targetTurn } from './target-game';
+import type { TargetGameMode } from './target-game';
 
 function el(tag: string, className = '', text = ''): HTMLElement {
   const node = document.createElement(tag);
@@ -130,18 +131,38 @@ export class TargetPracticePage {
     rounds.required = true;
     rounds.value = String(this.game.rounds);
     roundsLabel.append(rounds);
+    const modeLabel = document.createElement('label');
+    modeLabel.className = 'field target-mode-field';
+    modeLabel.append(el('span', '', 'Game mode'));
+    const mode = document.createElement('select');
+    const modes: [TargetGameMode, string][] = [
+      ['shared', 'Shared target each round'],
+      ['individual', 'Different target each turn'],
+      ['shuffled', 'Player by player, shuffled targets'],
+      ['fixed', 'Same target all game'],
+      ['ascending', 'Increasing targets'],
+      ['descending', 'Decreasing targets'],
+    ];
+    modes.forEach(([value, text]) => {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = text;
+      mode.append(option);
+    });
+    mode.value = this.game.mode;
+    modeLabel.append(mode);
     const start = document.createElement('button');
     start.type = 'submit';
     start.className = 'button quiet compact';
     start.textContent = 'New game';
     const setupFields = el('div', 'target-setup-fields');
-    setupFields.append(minimumLabel, maximumLabel, roundsLabel, start);
+    setupFields.append(modeLabel, minimumLabel, maximumLabel, roundsLabel, start);
     settings.append(playerFieldset, setupFields);
     settings.addEventListener('submit', (event) => {
       event.preventDefault();
       try {
         const names = [...playerList.querySelectorAll<HTMLInputElement>('.target-player-input')].map((input) => input.value);
-        this.game = createTargetGame(names, Number(rounds.value), Number(minimum.value), Number(maximum.value));
+        this.game = createTargetGame(names, Number(rounds.value), Number(minimum.value), Number(maximum.value), Math.random, mode.value as TargetGameMode);
       } catch (error) {
         this.toast(error instanceof Error ? error.message : 'The game settings are invalid.');
         return;
@@ -248,8 +269,7 @@ export class TargetPracticePage {
     const { players, rounds, attempts, awaitingNext } = this.game;
     const finished = attempts.length >= players.length * rounds;
     const currentIndex = awaitingNext ? attempts.length - 1 : attempts.length;
-    const playerIndex = currentIndex % players.length;
-    const currentRound = Math.floor(currentIndex / players.length) + 1;
+    const { playerIndex, round: currentRound } = targetTurn(this.game, currentIndex);
     const totals = players.map((name, index) => ({ name, index, points: attempts.filter((attempt) => attempt.playerIndex === index).reduce((sum, attempt) => sum + attempt.points, 0) }));
     const leaders = [...totals].sort((left, right) => right.points - left.points);
     target.textContent = this.game.target.toFixed(2);
@@ -263,7 +283,8 @@ export class TargetPracticePage {
       const direction = difference < 0.05 ? 'On target' : attempt.differenceMeters < 0 ? 'Too short' : 'Too far';
       result.append(el('strong', '', `${players[attempt.playerIndex]}: ${attempt.points} points`), el('span', '', `${attempt.measuredMeters.toFixed(3)} m · ${difference.toFixed(1)} cm · ${direction}`));
     } else result.append(el('span', '', 'Waiting for a reading'));
-    next.textContent = awaitingNext && attempts.length % players.length === 0 ? 'Next round' : 'Next player';
+    next.textContent = awaitingNext && !finished && targetTurn(this.game, attempts.length).playerIndex === playerIndex ? 'Next round'
+      : awaitingNext && !finished && targetTurn(this.game, attempts.length).round !== currentRound && this.game.mode !== 'shuffled' ? 'Next round' : 'Next player';
     next.disabled = !awaitingNext || finished;
     next.hidden = finished;
     manual.querySelectorAll<HTMLInputElement | HTMLButtonElement>('input, button').forEach((control) => { control.disabled = awaitingNext || finished; });

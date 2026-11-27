@@ -57,9 +57,82 @@ describe('target practice', () => {
     expect(() => createTargetGame(['A'], 21, 1, 2)).toThrow('rounds');
     expect(() => createTargetGame(['A'], 2, 0, 2)).toThrow('target range');
   });
+
+  it('gives each turn a different target when the range allows it', () => {
+    let game = createTargetGame(['Anna', 'Bela'], 2, 1, 1.01, () => 0, 'individual');
+    for (const target of [1, 1.01, 1, 1.01]) {
+      expect(game.target).toBe(target);
+      game = advanceTargetTurn(recordTargetAttempt(game, target), () => 0);
+    }
+    let fixedRange = createTargetGame(['Anna', 'Bela'], 1, 1, 1, () => 0, 'individual');
+    fixedRange = advanceTargetTurn(recordTargetAttempt(fixedRange, 1));
+    expect(fixedRange.target).toBe(1);
+  });
+
+  it('plays each player through the same targets in a shuffled order', () => {
+    const values = [0, 0.5, 0.999999, 0.999999, 0.999999];
+    let game = createTargetGame(['Anna', 'Bela'], 3, 1, 2, () => values.shift() ?? 0, 'shuffled');
+    const sequences: number[][] = [[], []];
+    for (let index = 0; index < 6; index++) {
+      game = recordTargetAttempt(game, game.target);
+      const attempt = game.attempts[index];
+      expect(attempt.playerIndex).toBe(Math.floor(index / 3));
+      expect(attempt.round).toBe(index % 3 + 1);
+      sequences[attempt.playerIndex].push(attempt.targetMeters);
+      game = advanceTargetTurn(game);
+    }
+    expect(sequences[0]).toEqual([1, 1.51, 2]);
+    expect(sequences[1]).not.toEqual(sequences[0]);
+    expect([...sequences[1]].sort()).toEqual([...sequences[0]].sort());
+  });
+
+  it('uses distinct shuffled targets where possible, even with repeated random values', () => {
+    const game = createTargetGame(['Anna', 'Bela'], 4, 1, 1.02, () => 0, 'shuffled');
+    expect(new Set(game.sequences[0]).size).toBe(3);
+    expect([...game.sequences[1]].sort()).toEqual([...game.sequences[0]].sort());
+    expect(game.sequences[1]).not.toEqual(game.sequences[0]);
+  });
+
+  it.each([
+    ['fixed', [1.5, 1.5, 1.5]],
+    ['ascending', [1, 1.5, 2]],
+    ['descending', [2, 1.5, 1]],
+  ] as const)('plays %s targets shared by each round', (mode, targets) => {
+    let game = createTargetGame(['Anna', 'Bela'], 3, 1, 2, () => 0.5, mode);
+    for (const target of targets) {
+      for (let player = 0; player < 2; player++) {
+        expect(game.target).toBe(target);
+        game = advanceTargetTurn(recordTargetAttempt(game, target), () => 0);
+      }
+    }
+    expect(game.attempts).toHaveLength(6);
+  });
 });
 
 describe('target practice page', () => {
+  it('runs player-by-player mode with correct turn and round labels', () => {
+    const page = new TargetPracticePage(localStorage, vi.fn(), vi.fn());
+    const main = document.createElement('main');
+    page.render(main);
+    const settings = main.querySelector<HTMLFormElement>('.target-settings')!;
+    settings.querySelector<HTMLSelectElement>('select')!.value = 'shuffled';
+    settings.querySelectorAll<HTMLInputElement>('input[type=number]')[2].value = '2';
+    settings.dispatchEvent(new Event('submit', { cancelable: true }));
+    const next = main.querySelector<HTMLButtonElement>('[data-target-next]')!;
+    expect(main.querySelector('[data-target-player]')?.textContent).toBe("Player 1's turn");
+    page.addMeasurement({ valueMeters: 1 });
+    expect(next.textContent).toBe('Next round');
+    next.click();
+    expect(main.querySelector('[data-target-progress]')?.textContent).toBe('Round 2 / 2');
+    expect(main.querySelector('[data-target-player]')?.textContent).toBe("Player 1's turn");
+    page.addMeasurement({ valueMeters: 1 });
+    expect(next.textContent).toBe('Next player');
+    next.click();
+    expect(main.querySelector('[data-target-progress]')?.textContent).toBe('Round 1 / 2');
+    expect(main.querySelector('[data-target-player]')?.textContent).toBe("Player 2's turn");
+    page.dispose();
+  });
+
   it('runs shared rounds for named players and ranks their total scores', () => {
     const page = new TargetPracticePage(localStorage, vi.fn(), vi.fn());
     const main = document.createElement('main');

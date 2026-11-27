@@ -192,6 +192,7 @@
   .target-manual, .target-setup-fields { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
   .target-manual { margin-top: 16px; }
   .target-manual .field, .target-setup-fields .field { flex: 1 1 130px; min-width: 0; }
+  .target-setup-fields .target-mode-field { flex-basis: 250px; }
   .target-manual .button, .target-settings .button { min-height: 46px; }
   .target-setup { margin-top: 20px; border-block: 1px solid var(--line); }
   .target-setup summary { padding: 14px 0; font-weight: 800; cursor: pointer; }
@@ -231,7 +232,7 @@
   .button.stretch { width: 100%; }
 
   .project-tools { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 7px; margin-bottom: 16px; }
-  .project-tools input, .field input, .field textarea {
+  .project-tools input, .field input, .field textarea, .target-mode-field select {
     width: 100%;
     min-width: 0;
     min-height: 46px;
