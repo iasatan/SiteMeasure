@@ -2,6 +2,7 @@ import { copyImportedProject, projectFilename, readBackupFile, readProjectFile, 
 import { ObjectLibrary } from './data/object-library';
 import { cloneParts, partBounds, type ObjectDefinition } from './domain/furniture';
 import { ObjectsPage } from './objects/objects-page';
+import { ScanPage } from './scan/scan-page';
 import { LocalStorageProjectRepository, type RepositoryWarning } from './data/local-storage-repository';
 import { createId, createProject, createRoom, DEFAULT_DOOR_HEIGHT_METERS, DEFAULT_WINDOW_HEIGHT_METERS, type EditingLayer, type PhotoAnnotation, type Project, type ProjectPhoto, type ProjectSummary, type Room } from './domain/models';
 import { FloorPlanEditor, type ClearanceSide, type EditorSelection } from './editor/floor-plan-editor';
@@ -17,7 +18,7 @@ import { processPhoto } from './photos/photo-processing';
 import { floorPlanSvg, measurementsCsv, printableReport, svgToPng } from './reports/project-exports';
 import type { DebugLog } from './debug-log';
 
-type PrimaryView = 'projects' | 'plan' | 'objects' | 'measure' | 'photos' | 'more' | 'ble';
+type PrimaryView = 'projects' | 'plan' | 'objects' | 'measure' | 'photos' | 'more' | 'ble' | 'scan';
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -60,6 +61,7 @@ export class SiteMeasureApp {
     toast: (message) => this.showToast(message),
     confirm: (message, onConfirm) => this.showConfirmationDialog('Replace saved object?', message, onConfirm),
   });
+  private readonly scanPage = new ScanPage(localStorage, (message) => this.showToast(message));
   private view: PrimaryView = 'projects';
   private layer: EditingLayer = 'builder';
   private selectedProjectId: string | null = null;
@@ -94,7 +96,14 @@ export class SiteMeasureApp {
       }
     });
     this.renderShell();
+    this.syncHiddenRoute();
+    window.addEventListener('hashchange', () => { this.syncHiddenRoute(); this.render(); });
     this.render();
+  }
+
+  private syncHiddenRoute(): void {
+    if (window.location.hash === '#scan') this.view = 'scan';
+    else if (this.view === 'scan') this.view = 'projects';
   }
 
   private renderShell(): void {
@@ -193,6 +202,9 @@ export class SiteMeasureApp {
         break;
       case 'ble':
         this.renderBleExplorer(main);
+        break;
+      case 'scan':
+        this.scanPage.render(main);
         break;
     }
     this.renderSaveIndicator();
@@ -2180,6 +2192,10 @@ export class SiteMeasureApp {
   }
 
   private setView(view: PrimaryView): void {
+    if (this.view === 'scan' && view !== 'scan') {
+      this.scanPage.dispose();
+      if (window.location.hash === '#scan') history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
     this.view = view;
     this.render();
   }
@@ -2352,7 +2368,7 @@ function formValue(formData: FormData, name: string): string {
 }
 
 function navSymbol(view: PrimaryView): string {
-  return { projects: 'P', plan: '⌜', objects: '▣', measure: '↕', photos: '□', more: '…', ble: 'B' }[view];
+  return { projects: 'P', plan: '⌜', objects: '▣', measure: '↕', photos: '□', more: '…', ble: 'B', scan: 'S' }[view];
 }
 
 function formatDate(value: string): string {
