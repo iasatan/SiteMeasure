@@ -63,7 +63,7 @@ export class SiteMeasureApp {
     toast: (message) => this.showToast(message),
     confirm: (message, onConfirm) => this.showConfirmationDialog('Replace saved object?', message, onConfirm),
   });
-  private readonly scanPage = new ScanPage(localStorage, (message) => this.showToast(message));
+  private readonly scanPage = new ScanPage(localStorage, (message) => this.showToast(message), (text, filename, mimeType) => this.downloadText(text, filename, mimeType));
   private view: PrimaryView = 'projects';
   private layer: EditingLayer = 'builder';
   private selectedProjectId: string | null = null;
@@ -1901,29 +1901,33 @@ export class SiteMeasureApp {
     backup.projects.forEach((project) => names.append(element('li', '', `${project.name} · ${totalRooms(project)} rooms · modified ${formatDate(project.modifiedAt)}`)));
     content.append(names);
     content.append(element('p', 'storage-warning', currentProjects.length
-      ? 'This replaces every local project. A download of your current projects will be requested first.'
+      ? 'This replaces every local project. An export of your current projects will be requested first.'
       : 'This replaces the local project list on this device.'));
     const actions = element('div', 'dialog-actions stacked');
     actions.append(button(currentProjects.length ? 'Download current backup & replace' : 'Restore projects', 'button danger stretch', () => {
-      try {
-        if (currentProjects.length) {
-          this.downloadText(serializeBackup(currentProjects), `sitemeasure-before-restore-${new Date().toISOString().slice(0, 10)}.sitemeasure-backup.json`, 'application/json');
+      const restore = () => {
+        if (!dialog.open) return;
+        try {
+          this.repository.replaceAll(backup.projects);
+          this.undoDeletion = null;
+          window.clearTimeout(this.undoTimer);
+          this.undoTimer = undefined;
+          this.selectedProjectId = null;
+          this.activeRoomId = null;
+          this.dirty = false;
+          this.saveState = 'saved';
+          this.saveTime = new Date().toISOString();
+          dialog.close();
+          this.setView('projects');
+          this.showToast('Backup restored');
+        } catch (error) {
+          this.reportPersistenceError(error);
         }
-        this.repository.replaceAll(backup.projects);
-        this.undoDeletion = null;
-        window.clearTimeout(this.undoTimer);
-        this.undoTimer = undefined;
-        this.selectedProjectId = null;
-        this.activeRoomId = null;
-        this.dirty = false;
-        this.saveState = 'saved';
-        this.saveTime = new Date().toISOString();
-        dialog.close();
-        this.setView('projects');
-        this.showToast('Backup restored');
-      } catch (error) {
-        this.reportPersistenceError(error);
-      }
+      };
+      try {
+        if (currentProjects.length) this.downloadText(serializeBackup(currentProjects), `sitemeasure-before-restore-${new Date().toISOString().slice(0, 10)}.sitemeasure-backup.json`, 'application/json', restore);
+        else restore();
+      } catch (error) { this.reportPersistenceError(error); }
     }));
     actions.append(button('Cancel', 'button quiet stretch', () => dialog.close()));
     content.append(actions);
@@ -2066,52 +2070,10 @@ export class SiteMeasureApp {
       const blob = new Blob([serialized], { type: 'application/json' });
       const filename = projectFilename(exported);
       report('blob-created', { bytes: blob.size, mimeType: blob.type, filename });
-      if (/\bBluefy\//i.test(navigator.userAgent) && typeof navigator.share === 'function' && typeof navigator.canShare === 'function' && typeof File === 'function') {
-        const file = new File([blob], filename, { type: blob.type });
-        const shareData: ShareData = { files: [file] };
-        let canShare = false;
-        try {
-          canShare = navigator.canShare(shareData);
-          report('file-share-capability', { canShare });
-        } catch (error) {
-          report('file-share-capability-failed', { error: error instanceof Error ? `${error.name}: ${error.message}` : String(error) });
-        }
-        if (canShare) {
-          const shareFailed = (error: unknown) => {
-            if (error && typeof error === 'object' && 'name' in error && error.name === 'AbortError') {
-              report('share-cancelled');
-              this.showToast('Project sharing cancelled.');
-              return;
-            }
-            this.debugLog?.log('project-export.failed', { stage: 'sharing-file', error: error instanceof Error ? `${error.name}: ${error.message}` : String(error) });
-            this.debugLog?.log('project-export.error', error);
-            this.showToast('Could not share the project.', 'Download instead', () => {
-              try {
-                this.downloadBlob(blob, filename, report);
-                report('download-requested', { browserConfirmationAvailable: false });
-                this.showToast('Project download requested. Check your browser downloads.');
-              } catch (downloadError) {
-                this.debugLog?.log('project-export.failed', { stage: failureStage ?? stage, error: downloadError instanceof Error ? `${downloadError.name}: ${downloadError.message}` : String(downloadError) });
-                this.debugLog?.log('project-export.error', downloadError);
-                this.showToast('Project export failed. Check the debug log for details.');
-              }
-            });
-          };
-          report('sharing-file', { userActivation: navigator.userActivation?.isActive ?? null });
-          try {
-            void navigator.share(shareData).then(() => {
-              report('share-completed', { fileSaveConfirmationAvailable: false });
-              this.showToast('Project share completed.');
-            }, shareFailed);
-          } catch (error) {
-            shareFailed(error);
-          }
-          return;
-        }
-      }
-      this.downloadBlob(blob, filename, report);
-      report('download-requested', { browserConfirmationAvailable: false });
-      this.showToast('Project download requested. Check your browser downloads.');
+      this.exportBlob(blob, filename, 'Project', report, (error, sharing) => {
+        this.debugLog?.log('project-export.failed', { stage: sharing ? 'sharing-file' : failureStage ?? stage, error: error instanceof Error ? `${error.name}: ${error.message}` : String(error) });
+        this.debugLog?.log('project-export.error', error);
+      });
     } catch (error) {
       this.debugLog?.log('project-export.failed', { stage: failureStage ?? stage, error: error instanceof Error ? `${error.name}: ${error.message}` : String(error) });
       this.debugLog?.log('project-export.error', error);
@@ -2122,7 +2084,9 @@ export class SiteMeasureApp {
   private async exportRoomPng(project: Project, room: Room): Promise<void> {
     try {
       const blob = await svgToPng(floorPlanSvg(project, room));
-      this.downloadBlob(blob, `${safeFilename(room.name)}-plan.png`);
+      const filename = `${safeFilename(room.name)}-plan.png`;
+      if (/\bBluefy\//i.test(navigator.userAgent)) this.showToast('PNG ready.', 'Export PNG', () => this.exportBlob(blob, filename));
+      else this.exportBlob(blob, filename);
     } catch (error) {
       this.debugLog?.log('handled.error', error);
       this.showToast(error instanceof Error ? error.message : 'The PNG could not be exported.');
@@ -2144,8 +2108,73 @@ export class SiteMeasureApp {
     }, { once: true });
   }
 
-  private downloadText(text: string, filename: string, mimeType: string): void {
-    this.downloadBlob(new Blob([text], { type: `${mimeType};charset=utf-8` }), filename);
+  private downloadText(text: string, filename: string, mimeType: string, onComplete?: () => void): void {
+    this.exportBlob(new Blob([text], { type: `${mimeType};charset=utf-8` }), filename, 'File', undefined, undefined, onComplete);
+  }
+
+  private exportBlob(blob: Blob, filename: string, label = 'File', report?: (step: string, detail?: Record<string, unknown>) => void, onError?: (error: unknown, sharing: boolean) => void, onComplete?: () => void): void {
+    this.root.querySelector('.export-share-fallback')?.remove();
+    const fail = (error: unknown, sharing: boolean) => {
+      if (onError) onError(error, sharing);
+      else this.debugLog?.log('file-export.error', error);
+    };
+    const download = () => {
+      try {
+        this.downloadBlob(blob, filename, report);
+        report?.('download-requested', { browserConfirmationAvailable: false });
+        this.showToast(`${label} download requested. Check your browser downloads.`);
+        onComplete?.();
+      } catch (error) {
+        fail(error, false);
+        this.showToast(`${label} export failed. Check the debug log for details.`);
+      }
+    };
+    if (/\bBluefy\//i.test(navigator.userAgent) && typeof navigator.share === 'function' && typeof navigator.canShare === 'function' && typeof File === 'function') {
+      let shareData: ShareData;
+      try {
+        shareData = { files: [new File([blob], filename, { type: blob.type })] };
+      } catch (error) {
+        fail(error, false);
+        this.showToast(`${label} export failed. Check the debug log for details.`);
+        return;
+      }
+      let canShare = false;
+      try {
+        canShare = navigator.canShare(shareData);
+        report?.('file-share-capability', { canShare });
+      } catch (error) {
+        report?.('file-share-capability-failed', { error: error instanceof Error ? `${error.name}: ${error.message}` : String(error) });
+      }
+      if (canShare) {
+        const shareFailed = (error: unknown) => {
+          if (error && typeof error === 'object' && 'name' in error && error.name === 'AbortError') {
+            report?.('share-cancelled');
+            this.showToast(`${label} sharing cancelled.`);
+            return;
+          }
+          fail(error, true);
+          const message = `Could not share the ${label.toLowerCase()}.`;
+          const dialogContent = this.root.querySelector<HTMLElement>('.app-dialog[open] .dialog-content');
+          if (dialogContent) {
+            const fallback = element('div', 'export-share-fallback');
+            fallback.append(element('p', 'validation-warning', message), button('Download instead', 'button quiet', () => { fallback.remove(); download(); }));
+            dialogContent.append(fallback);
+          } else this.showToast(message, 'Download instead', download);
+        };
+        report?.('sharing-file', { userActivation: navigator.userActivation?.isActive ?? null });
+        try {
+          void navigator.share(shareData).then(() => {
+            report?.('share-completed', { fileSaveConfirmationAvailable: false });
+            this.showToast(`${label} share completed.`);
+            onComplete?.();
+          }, shareFailed);
+        } catch (error) {
+          shareFailed(error);
+        }
+        return;
+      }
+    }
+    download();
   }
 
   private downloadBlob(blob: Blob, filename: string, report?: (step: string, detail?: Record<string, unknown>) => void): void {
@@ -2159,10 +2188,8 @@ export class SiteMeasureApp {
       report?.('link-created', { downloadAttributeSupported: 'download' in link });
       link.href = url;
       link.download = filename;
-      if (report) {
-        link.hidden = true;
-        document.body.append(link);
-      }
+      link.hidden = true;
+      document.body.append(link);
       report?.('clicking-link', { userActivation: navigator.userActivation?.isActive ?? null, attachedToDocument: link.isConnected });
       link.click();
       requested = true;
@@ -2172,12 +2199,12 @@ export class SiteMeasureApp {
       throw error;
     } finally {
       link?.remove();
-      if (report && requested) {
-        report('object-url-revocation-scheduled', { delayMs: 60000 });
+      if (requested) {
+        report?.('object-url-revocation-scheduled', { delayMs: 60000 });
         window.setTimeout(() => {
           try {
             URL.revokeObjectURL(url);
-            report('object-url-revoked');
+            report?.('object-url-revoked');
           } catch (error) {
             this.debugLog?.log('project-export.cleanup-error', error);
           }

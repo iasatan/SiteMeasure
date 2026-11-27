@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest';
-import { compassHeading, loadScanRecords, saveScanRecords, type ScanRecord } from '../src/scan/scan-records';
+import { describe, expect, it, vi } from 'vitest';
+import { compassHeading, loadScanRecords, parseScanRecords, saveScanRecords, type ScanRecord } from '../src/scan/scan-records';
 import { buildScanGeometry } from '../src/scan/scan-geometry';
+import { ScanPage } from '../src/scan/scan-page';
+
+vi.mock('../src/scan/scan-preview', () => ({
+  createScanPreview: () => ({ setScan: (records: ScanRecord[]) => ({ count: records.length, triangles: 0 }), dispose: () => {} }),
+}));
 
 function memoryStorage(): Pick<Storage, 'getItem' | 'setItem'> {
   const data = new Map<string, string>();
@@ -21,6 +26,63 @@ describe('scan records', () => {
     expect(loadScanRecords(storage)).toEqual([record]);
     storage.setItem('sitemeasure.scan.records', JSON.stringify([record, { id: 1 }]));
     expect(loadScanRecords(storage)).toEqual([record]);
+  });
+
+  it('accepts exported scan arrays and rejects partially invalid files', () => {
+    const record: ScanRecord = { id: 'a', capturedAt: '2026-01-01T00:00:00Z', distanceMeters: 2.5, orientation: { levelBeta: 1, levelGamma: -2, compassDegrees: null } };
+    expect(parseScanRecords(JSON.stringify([record]))).toEqual([record]);
+    expect(parseScanRecords('[]')).toEqual([]);
+    expect(() => parseScanRecords('{bad')).toThrow('not valid JSON');
+    expect(() => parseScanRecords(JSON.stringify([record, { id: 'bad' }]))).toThrow('not a valid scan record list');
+    expect(() => parseScanRecords('{"projects":[]}')).toThrow('not a valid scan record list');
+    expect(() => parseScanRecords('[{"id":"a","capturedAt":"","distanceMeters":1e400,"orientation":{"levelBeta":0,"levelGamma":0,"compassDegrees":0}}]')).toThrow('not a valid scan record list');
+  });
+
+  it('imports scans from the picker without duplicating or replacing existing records', async () => {
+    const storage = memoryStorage();
+    const existing: ScanRecord = { id: 'existing', capturedAt: '', distanceMeters: 3, orientation: { levelBeta: 1, levelGamma: 2, compassDegrees: 180 } };
+    const imported = { ...existing, id: 'new', distanceMeters: 4 };
+    saveScanRecords(storage, [existing]);
+    const toast = vi.fn();
+    const page = new ScanPage(storage as Storage, toast, vi.fn());
+    const main = document.createElement('main');
+    page.render(main);
+    const input = main.querySelector<HTMLInputElement>('input[type=file]')!;
+    const file = new File([], 'scan.json', { type: 'application/json' });
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(JSON.stringify([existing, imported, imported])) });
+    Object.defineProperty(input, 'files', { configurable: true, value: [file] });
+    input.dispatchEvent(new Event('change'));
+    await vi.waitFor(() => expect(toast).toHaveBeenCalledWith('Imported 1 scan reading; 2 already present.'));
+    expect(loadScanRecords(storage)).toEqual([existing, imported]);
+    expect(main.querySelectorAll('.scan-list p')).toHaveLength(2);
+    expect(main.querySelector('[data-scan-preview-status]')?.textContent).toBe('2 usable points');
+    page.dispose();
+  });
+
+  it('keeps existing scans when import validation or saving fails', async () => {
+    const storage = memoryStorage();
+    const existing: ScanRecord = { id: 'existing', capturedAt: '', distanceMeters: 3, orientation: { levelBeta: 1, levelGamma: 2, compassDegrees: 180 } };
+    saveScanRecords(storage, [existing]);
+    const toast = vi.fn();
+    const page = new ScanPage(storage as Storage, toast, vi.fn());
+    const main = document.createElement('main');
+    page.render(main);
+    const input = main.querySelector<HTMLInputElement>('input[type=file]')!;
+    const invalid = new File([], 'invalid.json');
+    Object.defineProperty(invalid, 'text', { value: () => Promise.resolve(JSON.stringify([existing, { id: 'invalid' }])) });
+    Object.defineProperty(input, 'files', { configurable: true, value: [invalid] });
+    input.dispatchEvent(new Event('change'));
+    await vi.waitFor(() => expect(toast).toHaveBeenCalledWith('The file is not a valid scan record list.'));
+    expect(loadScanRecords(storage)).toEqual([existing]);
+    const valid = new File([], 'valid.json');
+    Object.defineProperty(valid, 'text', { value: () => Promise.resolve(JSON.stringify([{ ...existing, id: 'new' }])) });
+    Object.defineProperty(input, 'files', { configurable: true, value: [valid] });
+    vi.spyOn(storage, 'setItem').mockImplementation(() => { throw new Error('Storage full'); });
+    input.dispatchEvent(new Event('change'));
+    await vi.waitFor(() => expect(toast).toHaveBeenCalledWith('Storage full'));
+    expect(loadScanRecords(storage)).toEqual([existing]);
+    expect(main.querySelectorAll('.scan-list p')).toHaveLength(1);
+    page.dispose();
   });
 });
 
@@ -49,6 +111,25 @@ describe('scan geometry', () => {
     expect(buildScanGeometry([record(0, 0), record(0, 0), record(0, 1)], 'surface').triangles).toBe(0);
   });
 
+  it('connects interior readings with nearby points in both surface modes', () => {
+    const records = [0, 5, 10].flatMap((elevation) => [220, 225, 230].map((heading) => record(heading, elevation, 4)));
+    for (const mode of ['surface', 'smooth'] as const) {
+      const { geometry, triangles } = buildScanGeometry(records, mode);
+      const indices = Array.from(geometry.getIndex()!.array);
+      expect(triangles).toBe(8);
+      expect(new Set(indices).size).toBe(9);
+      for (let index = 0; index < indices.length; index += 3) {
+        const face = indices.slice(index, index + 3);
+        for (let edge = 0; edge < 3; edge++) {
+          const first = records[face[edge]].orientation;
+          const second = records[face[(edge + 1) % 3]].orientation;
+          expect(Math.abs(first.compassDegrees! - second.compassDegrees!)).toBeLessThanOrEqual(5);
+          expect(Math.abs(first.levelBeta - second.levelBeta)).toBeLessThanOrEqual(5);
+        }
+      }
+    }
+  });
+
   it('creates a surface from the sample scan including repeated directions', () => {
     const readings = [[5.009, 21, 309], [5.099, 19.8, 307], [4.035, 18.7, 312], [5.041, 19, 306], [5.128, 21.6, 307], [4.970, 23.3, 311], [5.131, 24.6, 309], [5.242, 25.5, 308], [5.270, 25.5, 308], [5.363, 26, 307], [5.302, 26.7, 306], [5.275, 26.7, 309]];
     const records = readings.map(([distance, elevation, heading]) => record(heading, elevation, distance));
@@ -57,6 +138,23 @@ describe('scan geometry', () => {
       expect(result.count).toBe(12);
       expect(result.triangles).toBeGreaterThan(0);
       expect(Array.from(result.geometry.getAttribute('position').array).every(Number.isFinite)).toBe(true);
+    }
+  });
+
+  it('connects all distinct directions in the larger scan', () => {
+    const readings = [
+      [4.340, 43.2, 222], [4.207, 40.4, 222], [3.933, 41.6, 233], [4.271, 39.9, 238], [4.202, 39.9, 247], [3.726, 40.0, 254], [3.752, 39.7, 261], [3.847, 39.2, 267], [4.060, 38.0, 275],
+      [3.870, 33.4, 274], [3.772, 33.9, 270], [3.661, 34.0, 261], [3.596, 34.2, 255], [3.599, 33.8, 251], [4.053, 33.6, 248], [4.082, 32.9, 243], [4.180, 32.6, 234], [3.756, 33.2, 232], [4.072, 32.4, 222],
+      [3.990, 28.0, 222], [3.657, 28.8, 232], [4.076, 28.2, 234], [3.925, 28.2, 248], [3.476, 28.5, 250], [3.544, 28.0, 261], [3.817, 27.2, 274], [3.769, 21.0, 274], [3.542, 21.4, 266], [3.435, 20.7, 259],
+      [3.773, 20.5, 248], [3.978, 20.1, 235], [3.675, 20.5, 228], [3.862, 16.7, 223], [3.986, 13.1, 223], [4.023, 13.6, 229], [3.949, 14.6, 234], [3.756, 15.2, 247], [3.414, 14.7, 260], [3.744, 28.1, 269],
+      [3.593, 16.0, 269], [3.448, 16.6, 262], [3.755, 19.8, 227], [3.561, 22.7, 216], [3.751, 32.1, 216], [2.946, 30.0, 206], [2.853, 20.2, 207], [2.935, 37.5, 201], [2.492, 34.7, 192], [2.291, 22.2, 191],
+      [2.199, 30.6, 181], [2.250, 40.6, 172], [1.964, 24.7, 164], [4.089, 30.9, 241], [3.792, 0.8, 245], [3.547, 0.2, 262], [3.736, 2.5, 272],
+    ];
+    const records = readings.map(([distance, elevation, heading]) => record(heading, elevation, distance));
+    for (const mode of ['surface', 'smooth'] as const) {
+      const { geometry, count } = buildScanGeometry(records, mode);
+      expect(count).toBe(56);
+      expect(new Set(geometry.getIndex()!.array).size).toBe(56);
     }
   });
 });

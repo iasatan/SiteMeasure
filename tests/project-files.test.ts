@@ -5,6 +5,9 @@ import { ProjectValidationError } from '../src/data/schema';
 import { SiteMeasureApp } from '../src/app';
 import { LocalStorageProjectRepository } from '../src/data/local-storage-repository';
 import type { DebugLog } from '../src/debug-log';
+import * as projectExports from '../src/reports/project-exports';
+import { ObjectLibrary } from '../src/data/object-library';
+import { createObjectDefinition, OBJECT_PRESETS } from '../src/domain/furniture';
 
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
@@ -246,13 +249,13 @@ describe('project files', () => {
     const root = document.createElement('div');
     const app = new SiteMeasureApp(root) as unknown as {
       showBackupPreview(backup: ReturnType<typeof parseBackupFile>): void;
-      downloadText(text: string, filename: string, mimeType: string): void;
+      downloadText(text: string, filename: string, mimeType: string, onComplete?: () => void): void;
     };
     const dialog = root.querySelector<HTMLDialogElement>('.app-dialog')!;
     dialog.showModal = () => dialog.setAttribute('open', '');
     dialog.close = () => dialog.removeAttribute('open');
     const downloads: string[] = [];
-    app.downloadText = (text) => downloads.push(text);
+    app.downloadText = (text, _filename, _mimeType, onComplete) => { downloads.push(text); onComplete?.(); };
 
     app.showBackupPreview(parseBackupFile(serializeBackup([incoming])));
     expect(dialog.textContent).toContain('Restored project');
@@ -262,6 +265,64 @@ describe('project files', () => {
     expect(parseBackupFile(downloads[0]).projects.map((project) => project.id)).toEqual([existing.id]);
     expect(repository.list().map((project) => project.id)).toEqual([incoming.id]);
     expect(dialog.open).toBe(false);
+    root.remove();
+  });
+
+  it('does not replace projects until Bluefy backup sharing completes', async () => {
+    localStorage.clear();
+    const existing = createProject('Current local project');
+    const incoming = createProject('Restored project');
+    const repository = new LocalStorageProjectRepository(localStorage);
+    repository.save(existing);
+    let resolveShare!: () => void;
+    let rejectShare!: (error: unknown) => void;
+    const share = vi.fn<(data: ShareData) => Promise<void>>(() => new Promise((resolve, reject) => { resolveShare = resolve; rejectShare = reject; }));
+    vi.stubGlobal('navigator', { userAgent: 'iPhone Bluefy/3.9.3', platform: 'iPhone', canShare: () => true, share });
+    const root = document.createElement('div');
+    const app = new SiteMeasureApp(root) as unknown as { showBackupPreview(backup: ReturnType<typeof parseBackupFile>): void };
+    const dialog = root.querySelector<HTMLDialogElement>('.app-dialog')!;
+    dialog.showModal = () => dialog.setAttribute('open', '');
+    dialog.close = () => dialog.removeAttribute('open');
+    app.showBackupPreview(parseBackupFile(serializeBackup([incoming])));
+    const restore = [...dialog.querySelectorAll('button')].find((item) => item.textContent === 'Download current backup & replace')!;
+    restore.click();
+    expect(repository.list().map((project) => project.id)).toEqual([existing.id]);
+    rejectShare(new DOMException('Cancelled', 'AbortError'));
+    await Promise.resolve();
+    expect(repository.list().map((project) => project.id)).toEqual([existing.id]);
+    expect(dialog.open).toBe(true);
+    restore.click();
+    expect(repository.list().map((project) => project.id)).toEqual([existing.id]);
+    resolveShare();
+    await Promise.resolve();
+    expect(repository.list().map((project) => project.id)).toEqual([incoming.id]);
+    expect(dialog.open).toBe(false);
+    root.remove();
+  });
+
+  it('offers the backup download inside the restore dialog after a share failure', async () => {
+    vi.useFakeTimers();
+    localStorage.clear();
+    const existing = createProject('Current local project');
+    const incoming = createProject('Restored project');
+    const repository = new LocalStorageProjectRepository(localStorage);
+    repository.save(existing);
+    vi.stubGlobal('navigator', { userAgent: 'iPhone Bluefy/3.9.3', platform: 'iPhone', canShare: () => true, share: () => Promise.reject(new Error('Share unavailable')) });
+    vi.stubGlobal('URL', Object.assign(class extends URL {}, { createObjectURL: () => 'blob:test', revokeObjectURL: vi.fn() }));
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    const root = document.createElement('div');
+    const app = new SiteMeasureApp(root) as unknown as { showBackupPreview(backup: ReturnType<typeof parseBackupFile>): void };
+    const dialog = root.querySelector<HTMLDialogElement>('.app-dialog')!;
+    dialog.showModal = () => dialog.setAttribute('open', '');
+    dialog.close = () => dialog.removeAttribute('open');
+    app.showBackupPreview(parseBackupFile(serializeBackup([incoming])));
+    [...dialog.querySelectorAll('button')].find((item) => item.textContent === 'Download current backup & replace')!.click();
+    await Promise.resolve();
+    expect(repository.list().map((project) => project.id)).toEqual([existing.id]);
+    dialog.querySelector<HTMLButtonElement>('.export-share-fallback button')!.click();
+    expect(click).toHaveBeenCalledOnce();
+    expect(repository.list().map((project) => project.id)).toEqual([incoming.id]);
+    vi.advanceTimersByTime(60000);
     root.remove();
   });
 
@@ -396,6 +457,92 @@ describe('project files', () => {
     expect(file.size).toBeGreaterThan(0);
     await Promise.resolve();
     expect(log).toHaveBeenCalledWith('project-export', expect.objectContaining({ step: 'share-completed' }));
+    root.remove();
+  });
+
+  it('shares other text exports on Bluefy', () => {
+    const share = vi.fn<(data: ShareData) => Promise<void>>(() => Promise.resolve());
+    vi.stubGlobal('navigator', { userAgent: 'iPhone Bluefy/3.9.3', platform: 'iPhone', canShare: () => true, share });
+    const root = document.createElement('div');
+    const app = new SiteMeasureApp(root) as unknown as { downloadText(text: string, filename: string, mimeType: string): void };
+    app.downloadText('measurement', 'measurements.csv', 'text/csv');
+    expect(share).toHaveBeenCalledOnce();
+    expect(share.mock.calls[0][0].files![0].name).toBe('measurements.csv');
+    expect(share.mock.calls[0][0].files![0].type).toBe('text/csv;charset=utf-8');
+    root.remove();
+  });
+
+  it('shares backup, CSV, SVG, and object exports from their buttons', () => {
+    localStorage.clear();
+    const project = createProject('Example');
+    new LocalStorageProjectRepository(localStorage).save(project);
+    new ObjectLibrary(localStorage).save(createObjectDefinition('Cabinet', OBJECT_PRESETS[0].build()));
+    const share = vi.fn<(data: ShareData) => Promise<void>>(() => Promise.resolve());
+    vi.stubGlobal('navigator', { userAgent: 'iPhone Bluefy/3.9.3', platform: 'iPhone', canShare: () => true, share });
+    const root = document.createElement('div');
+    const app = new SiteMeasureApp(root) as unknown as {
+      selectedProjectId: string;
+      renderMore(main: HTMLElement): void;
+      objectsPage: { render(main: HTMLElement): void };
+    };
+    app.selectedProjectId = project.id;
+    const main = document.createElement('main');
+    app.renderMore(main);
+    for (const label of ['Export full backup', 'Export measurements CSV', 'Export room SVG']) {
+      [...main.querySelectorAll('button')].find((item) => item.textContent === label)!.click();
+    }
+    app.objectsPage.render(main);
+    [...main.querySelectorAll('button')].find((item) => item.textContent === 'Export all')!.click();
+    const files = share.mock.calls.map(([data]) => data.files![0]);
+    expect(files).toHaveLength(4);
+    expect(files.map((file) => file.type)).toEqual(['application/json;charset=utf-8', 'text/csv;charset=utf-8', 'image/svg+xml;charset=utf-8', 'application/json;charset=utf-8']);
+    expect(files.map((file) => file.name)).toEqual([expect.stringContaining('.sitemeasure-backup.json'), expect.stringContaining('.csv'), expect.stringContaining('.svg'), expect.stringContaining('.json')]);
+    root.remove();
+  });
+
+  it('uses an attached link and delayed cleanup for non-project download fallback', () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('navigator', { userAgent: 'iPhone Bluefy/3.9.3', platform: 'iPhone', canShare: () => false, share: vi.fn() });
+    const revoke = vi.fn();
+    vi.stubGlobal('URL', Object.assign(class extends URL {}, { createObjectURL: () => 'blob:test', revokeObjectURL: revoke }));
+    let attached = false;
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) { attached = this.isConnected; });
+    const root = document.createElement('div');
+    const app = new SiteMeasureApp(root) as unknown as { downloadText(text: string, filename: string, mimeType: string): void };
+    app.downloadText('data', 'scan.json', 'application/json');
+    expect(attached).toBe(true);
+    expect(revoke).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(60000);
+    expect(revoke).toHaveBeenCalledWith('blob:test');
+    root.remove();
+  });
+
+  it('shares scan JSON through the application exporter on Bluefy', () => {
+    const share = vi.fn<(data: ShareData) => Promise<void>>(() => Promise.resolve());
+    vi.stubGlobal('navigator', { userAgent: 'iPhone Bluefy/3.9.3', platform: 'iPhone', canShare: () => true, share });
+    const root = document.createElement('div');
+    const app = new SiteMeasureApp(root) as unknown as { scanPage: { render(main: HTMLElement): void; dispose(): void } };
+    const main = document.createElement('main');
+    app.scanPage.render(main);
+    [...main.querySelectorAll('button')].find((item) => item.textContent === 'Download JSON')!.click();
+    expect(share).toHaveBeenCalledOnce();
+    expect(share.mock.calls[0][0].files![0].name).toBe('sitemeasure-scan.json');
+    app.scanPage.dispose();
+    root.remove();
+  });
+
+  it('requests a fresh tap before sharing an asynchronously generated PNG on Bluefy', async () => {
+    const share = vi.fn<(data: ShareData) => Promise<void>>(() => Promise.resolve());
+    vi.stubGlobal('navigator', { userAgent: 'iPhone Bluefy/3.9.3', platform: 'iPhone', canShare: () => true, share });
+    vi.spyOn(projectExports, 'svgToPng').mockResolvedValue(new Blob(['png'], { type: 'image/png' }));
+    const root = document.createElement('div');
+    const app = new SiteMeasureApp(root) as unknown as { exportRoomPng(project: ReturnType<typeof createProject>, room: ReturnType<typeof createRoom>): Promise<void> };
+    const project = createProject('Example');
+    await app.exportRoomPng(project, project.buildings[0].floors[0].rooms[0]);
+    expect(share).not.toHaveBeenCalled();
+    root.querySelector<HTMLButtonElement>('.toast-action')!.click();
+    expect(share).toHaveBeenCalledOnce();
+    expect(share.mock.calls[0][0].files![0].type).toBe('image/png');
     root.remove();
   });
 

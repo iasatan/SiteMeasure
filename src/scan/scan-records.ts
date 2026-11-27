@@ -40,15 +40,26 @@ export function saveScanRecords(storage: Pick<Storage, 'setItem'>, records: read
   storage.setItem(STORAGE_KEY, JSON.stringify(records));
 }
 
+export function parseScanRecords(text: string): ScanRecord[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error('The scan file is not valid JSON.');
+  }
+  if (!Array.isArray(parsed) || !parsed.every(isScanRecord)) throw new Error('The file is not a valid scan record list.');
+  return parsed;
+}
+
 function isScanRecord(value: unknown): value is ScanRecord {
   if (!value || typeof value !== 'object') return false;
   const record = value as Partial<ScanRecord>;
   const orientation = record.orientation;
   return typeof record.id === 'string'
     && typeof record.capturedAt === 'string'
-    && typeof record.distanceMeters === 'number'
+    && typeof record.distanceMeters === 'number' && Number.isFinite(record.distanceMeters)
     && !!orientation
-    && typeof orientation.levelBeta === 'number'
-    && typeof orientation.levelGamma === 'number'
-    && (orientation.compassDegrees === null || typeof orientation.compassDegrees === 'number');
+    && typeof orientation.levelBeta === 'number' && Number.isFinite(orientation.levelBeta)
+    && typeof orientation.levelGamma === 'number' && Number.isFinite(orientation.levelGamma)
+    && (orientation.compassDegrees === null || (typeof orientation.compassDegrees === 'number' && Number.isFinite(orientation.compassDegrees)));
 }

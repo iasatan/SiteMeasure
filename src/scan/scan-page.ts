@@ -5,7 +5,7 @@ import type { BluetoothConnectionState, LaserMeasureAdapter, ParsedMeasurement }
 import { createId } from '../domain/models';
 import type { ScanMode } from './scan-geometry';
 import { createScanPreview, type ScanPreview } from './scan-preview';
-import { loadScanRecords, orientationFromEvent, saveScanRecords, type ScanOrientation, type ScanRecord } from './scan-records';
+import { loadScanRecords, orientationFromEvent, parseScanRecords, saveScanRecords, type ScanOrientation, type ScanRecord } from './scan-records';
 
 type PermissionedOrientationEvent = typeof DeviceOrientationEvent & { requestPermission?: () => Promise<'granted' | 'denied'> };
 
@@ -29,7 +29,7 @@ export class ScanPage {
     this.updateLive();
   };
 
-  constructor(private readonly storage: Storage, private readonly toast: (message: string) => void) {
+  constructor(private readonly storage: Storage, private readonly toast: (message: string) => void, private readonly downloadText: (text: string, filename: string, mimeType: string) => void) {
     this.records = loadScanRecords(storage);
   }
 
@@ -85,9 +85,20 @@ export class ScanPage {
     page.append(list);
 
     const actions = el('div', 'project-tools');
+    const importInput = document.createElement('input');
+    importInput.type = 'file';
+    importInput.accept = '.json,application/json';
+    importInput.hidden = true;
+    importInput.addEventListener('change', () => {
+      const file = importInput.files?.[0];
+      importInput.value = '';
+      if (file) void this.importFile(file);
+    });
     actions.append(
+      button('Import JSON', 'button quiet compact', () => importInput.click()),
       button('Download JSON', 'button quiet compact', () => this.download()),
       button('Clear list', 'button quiet compact', () => this.clear()),
+      importInput,
     );
     page.append(actions);
     main.append(page);
@@ -206,12 +217,27 @@ export class ScanPage {
   }
 
   private download(): void {
-    const url = URL.createObjectURL(new Blob([JSON.stringify(this.records, null, 2)], { type: 'application/json' }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'sitemeasure-scan.json';
-    link.click();
-    URL.revokeObjectURL(url);
+    this.downloadText(JSON.stringify(this.records, null, 2), 'sitemeasure-scan.json', 'application/json');
+  }
+
+  private async importFile(file: File): Promise<void> {
+    try {
+      const imported = parseScanRecords(await file.text());
+      const ids = new Set(this.records.map((record) => record.id));
+      const added = imported.filter((record) => {
+        if (ids.has(record.id)) return false;
+        ids.add(record.id);
+        return true;
+      });
+      const records = [...this.records, ...added];
+      saveScanRecords(this.storage, records);
+      this.records = records;
+      this.renderList();
+      const skipped = imported.length - added.length;
+      this.toast(`Imported ${added.length} scan ${added.length === 1 ? 'reading' : 'readings'}${skipped ? `; ${skipped} already present` : ''}.`);
+    } catch (error) {
+      this.toast(error instanceof Error ? error.message : 'The scan file could not be imported.');
+    }
   }
 }
 

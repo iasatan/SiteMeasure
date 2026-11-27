@@ -68,7 +68,8 @@ export function createScanPreview(container: HTMLElement): ScanPreview | null {
       const bounds = geometry.boundingBox;
       const size = bounds?.getSize(new THREE.Vector3()).length() || 1;
       const pointMaterial = new THREE.PointsMaterial({ color: 0xc55031, size: Math.max(size * 0.018, 0.015), sizeAttenuation: true });
-      current.add(new THREE.Points(geometry, pointMaterial));
+      const pointsGeometry = geometry.getIndex() ? geometry.clone().setIndex(null) : geometry;
+      current.add(new THREE.Points(pointsGeometry, pointMaterial));
       if (mode === 'path' && count > 1) current.add(new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: 0x176b64 })));
       if ((mode === 'surface' || mode === 'smooth') && triangles) {
         current.add(new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: 0x55998f, side: THREE.DoubleSide, roughness: 0.8, flatShading: mode === 'surface' })));
