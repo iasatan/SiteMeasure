@@ -3,6 +3,8 @@ import { loadCustomBoschProfile } from '../bluetooth/custom-bosch-profile';
 import { selectBluetoothProvider } from '../bluetooth/providers/select-bluetooth-provider';
 import type { BluetoothConnectionState, LaserMeasureAdapter, ParsedMeasurement } from '../bluetooth/types';
 import { createId } from '../domain/models';
+import type { ScanMode } from './scan-geometry';
+import { createScanPreview, type ScanPreview } from './scan-preview';
 import { loadScanRecords, orientationFromEvent, saveScanRecords, type ScanOrientation, type ScanRecord } from './scan-records';
 
 type PermissionedOrientationEvent = typeof DeviceOrientationEvent & { requestPermission?: () => Promise<'granted' | 'denied'> };
@@ -16,6 +18,8 @@ export class ScanPage {
   private detail = '';
   private sensorsActive = false;
   private container: HTMLElement | null = null;
+  private preview: ScanPreview | null = null;
+  private mode: ScanMode = 'points';
   private readonly provider = selectBluetoothProvider();
   private readonly onOrientation = (event: Event): void => {
     const next = orientationFromEvent(event as DeviceOrientationEvent);
@@ -30,6 +34,8 @@ export class ScanPage {
   }
 
   render(main: HTMLElement): void {
+    this.preview?.dispose();
+    this.preview = null;
     this.container = main;
     main.replaceChildren();
     const page = el('section', 'page scan-page');
@@ -51,6 +57,29 @@ export class ScanPage {
     live.dataset.scanLive = '';
     page.append(live);
 
+    const previewHeading = el('div', 'scan-preview-heading');
+    previewHeading.append(el('h2', '', '3D scan'));
+    const modeLabel = document.createElement('label');
+    modeLabel.textContent = 'View ';
+    const modeSelect = document.createElement('select');
+    for (const [value, label] of [['points', 'Points'], ['path', 'Connected points'], ['surface', 'Surface'], ['smooth', 'Smoothed surface']] as const) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      modeSelect.append(option);
+    }
+    modeSelect.value = this.mode;
+    modeSelect.addEventListener('change', () => { this.mode = modeSelect.value as ScanMode; this.updatePreview(); });
+    modeLabel.append(modeSelect);
+    previewHeading.append(modeLabel);
+    page.append(previewHeading);
+    const previewHost = el('div', 'scan-preview');
+    page.append(previewHost);
+    const previewStatus = el('p', 'bluetooth-help');
+    previewStatus.dataset.scanPreviewStatus = '';
+    page.append(previewStatus);
+    page.append(el('p', 'bluetooth-help', 'Estimate assumes all readings share one position and the phone tilt matches the laser elevation. Roll is not used.'));
+
     const list = el('div', 'scan-list');
     list.dataset.scanList = '';
     page.append(list);
@@ -62,6 +91,8 @@ export class ScanPage {
     );
     page.append(actions);
     main.append(page);
+    this.preview = createScanPreview(previewHost);
+    if (!this.preview) previewHost.textContent = '3D preview is unavailable in this browser.';
     this.updateLive();
     this.renderList();
   }
@@ -71,6 +102,8 @@ export class ScanPage {
     window.removeEventListener('deviceorientation', this.onOrientation, true);
     this.sensorsActive = false;
     void this.disconnectLaser();
+    this.preview?.dispose();
+    this.preview = null;
     this.container = null;
   }
 
@@ -143,6 +176,7 @@ export class ScanPage {
   }
 
   private renderList(): void {
+    this.updatePreview(true);
     const list = this.container?.querySelector<HTMLElement>('[data-scan-list]');
     if (!list) return;
     list.replaceChildren();
@@ -152,6 +186,17 @@ export class ScanPage {
       const compass = compassDegrees === null ? 'n/a' : `${compassDegrees.toFixed(0)}°`;
       list.append(el('p', '', `${index + 1}. ${record.distanceMeters.toFixed(3)} m · level ${levelBeta.toFixed(1)}° / ${levelGamma.toFixed(1)}° · compass ${compass}`));
     });
+  }
+
+  private updatePreview(fit = false): void {
+    const status = this.container?.querySelector<HTMLElement>('[data-scan-preview-status]');
+    if (!this.preview || !status) return;
+    const { count, triangles } = this.preview.setScan(this.records, this.mode, fit);
+    const skipped = this.records.length - count;
+    const details = [`${count} usable ${count === 1 ? 'point' : 'points'}`];
+    if (skipped) details.push(`${skipped} skipped (missing or invalid direction or distance)`);
+    if ((this.mode === 'surface' || this.mode === 'smooth') && count && !triangles) details.push('Surface requires at least three distinct, non-collinear directions');
+    status.textContent = details.join(' · ');
   }
 
   private clear(): void {

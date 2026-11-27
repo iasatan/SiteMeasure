@@ -481,6 +481,11 @@
 
 .object-preview { width: 100%; height: 260px; margin: 12px 0 6px; border: 1px solid var(--line); background: #f1f3ef; overflow: hidden; display: grid; place-items: center; color: var(--muted); font-size: 0.82rem; text-align: center; }
 .object-preview-canvas { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+.scan-preview-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 20px; }
+.scan-preview-heading h2 { margin: 0; }
+.scan-preview-heading select { margin-left: 6px; }
+.scan-preview { width: 100%; height: clamp(280px, 45vh, 500px); margin-top: 10px; background: #f1f3ef; display: grid; place-items: center; color: var(--muted); }
+.scan-preview-canvas { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
 .object-row { flex-wrap: wrap; gap: 6px; align-items: center; }
 .object-row > span { flex: 1 1 100%; }
 .object-part-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
