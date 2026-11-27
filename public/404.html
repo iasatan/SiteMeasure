@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>SiteMeasure</title>
+    <script>
+      // GitHub Pages serves this for unknown paths such as /SiteMeasure/scan; redirect to the hash route.
+      (function () {
+        var routes = ['projects', 'plan', 'objects', 'measure', 'photos', 'more', 'ble', 'scan'];
+        var parts = location.pathname.replace(/\/+$/, '').split('/');
+        var last = parts.pop();
+        var base = parts.join('/') + '/';
+        var hash = routes.indexOf(last) >= 0 ? '#' + last : '';
+        location.replace(base + location.search + hash);
+      })();
+    </script>
+  </head>
+  <body></body>
+</html>
