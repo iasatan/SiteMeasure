@@ -485,4 +485,12 @@
 .object-row > span { flex: 1 1 100%; }
 .object-part-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
 .object-part-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
+.object-editor-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.object-expert-bar, .object-expert-steps { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.object-expert-bar { position: sticky; top: 0; z-index: 2; background: var(--surface, #fff); padding: 6px 0; }
+.object-expert { display: grid; gap: 10px; margin: 10px 0; }
+.object-expert-pad { display: grid; gap: 6px; }
+.object-expert-axis { display: grid; grid-template-columns: 56px 1fr 56px; align-items: center; gap: 6px; text-align: center; font-variant-numeric: tabular-nums; }
+.object-expert-axis .button { min-height: 48px; font-size: 1.4rem; touch-action: manipulation; }
+.object-expert-details { margin: 8px 0; }
 .object-dimensions { margin-top: 0; }

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { ObjectLibrary } from '../src/data/object-library';
-import { applyPartChange, cloneParts, createObjectDefinition, OBJECT_PRESETS, ObjectValidationError, parseObjectFile, partBounds, scaleParts, serializeObjects, validateParts } from '../src/domain/furniture';
+import { applyPartChange, cloneParts, groundAndCenter, mirrorParts, snapValue, createObjectDefinition, OBJECT_PRESETS, ObjectValidationError, parseObjectFile, partBounds, scaleParts, serializeObjects, validateParts } from '../src/domain/furniture';
 import { buildPartsGroup } from '../src/objects/object-preview';
 import { ObjectsPage } from '../src/objects/objects-page';
 
@@ -164,5 +164,23 @@ describe('templates and attachments', () => {
     const copy = cloneParts(parts);
     expect(copy[1].parentId).toBe(copy[0].id);
     expect(copy[0].id).not.toBe(parts[0].id);
+  });
+});
+
+describe('expert editing helpers', () => {
+  it('snaps, grounds, centres and mirrors', () => {
+    expect(snapValue(0.137, 0.05)).toBe(0.15);
+    expect(snapValue(0.137, 0)).toBe(0.137);
+    const parts = OBJECT_PRESETS[1].build();
+    parts[0].yMeters += 2;
+    parts[0].xMeters += 1;
+    groundAndCenter(parts);
+    const bounds = partBounds(parts);
+    expect(bounds.min.y).toBeCloseTo(0);
+    expect(bounds.min.x + bounds.max.x).toBeCloseTo(0);
+    const before = partBounds(parts);
+    mirrorParts(parts, 'x');
+    expect(partBounds(parts).widthMeters).toBeCloseTo(before.widthMeters);
+    expect(partBounds(parts).min.x).toBeCloseTo(before.min.x);
   });
 });
