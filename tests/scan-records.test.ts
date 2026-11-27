@@ -21,7 +21,7 @@ describe('scan records', () => {
     const app = new SiteMeasureApp(root) as unknown as { scanPage: ScanPage };
     const dispose = vi.spyOn(app.scanPage, 'dispose');
     expect(root.querySelector('.misc-page h1')?.textContent).toBe('Misc');
-    expect([...root.querySelectorAll('.misc-feature-list button')].map((item) => item.textContent)).toEqual(['Scan→', 'Speedometer→']);
+    expect([...root.querySelectorAll('.misc-feature-list button')].map((item) => item.textContent)).toEqual(['Scan→', 'Speedometer→', 'Target Practice→']);
     root.querySelector<HTMLButtonElement>('.misc-feature-list button')!.click();
     expect(window.location.hash).toBe('#scan');
     expect(root.querySelector('.scan-page h1')?.textContent).toBe('Scan');
