@@ -1,16 +1,17 @@
 import { copyImportedProject, projectFilename, readBackupFile, readProjectFile, serializeBackup, serializeProject, type BackupFile } from './data/project-files';
 import { ObjectLibrary } from './data/object-library';
+import { externalizePhotos, hydratePhotos, IndexedDbPhotoStore, projectPhotos } from './data/photo-store';
 import { cloneParts, partBounds, type ObjectDefinition } from './domain/furniture';
 import { ObjectsPage } from './objects/objects-page';
 import { ScanPage } from './scan/scan-page';
 import { SpeedometerPage } from './speedometer/speedometer-page';
 import { TargetPracticePage } from './target-practice/target-practice-page';
-import { LocalStorageProjectRepository, type RepositoryWarning } from './data/local-storage-repository';
+import { LocalStorageProjectRepository, STORAGE_KEYS, type RepositoryWarning } from './data/local-storage-repository';
 import { createId, createProject, createRoom, DEFAULT_DOOR_HEIGHT_METERS, DEFAULT_WINDOW_HEIGHT_METERS, type EditingLayer, type PhotoAnnotation, type Project, type ProjectPhoto, type ProjectSummary, type Room } from './domain/models';
 import { FloorPlanEditor, type ClearanceSide, type EditorSelection } from './editor/floor-plan-editor';
 import { deriveOpeningSegments, distanceBetween, formatArea, formatLength, formatVolume, openingArea, polygonIssues, roomArea, roomHeight, roomVolume, wallArea, type OpeningSegmentKey } from './geometry';
 import { BoschLaserMeasureAdapter } from './bluetooth/bosch-laser-measure-adapter';
-import { clearCustomBoschProfile, loadCustomBoschProfile, loadCustomBoschProfileSettings, saveCustomBoschProfile, type BoschPayloadFormat } from './bluetooth/custom-bosch-profile';
+import { clearCustomBoschProfile, DEFAULT_CUSTOM_BOSCH_PROFILE_SETTINGS, loadCustomBoschProfile, loadCustomBoschProfileSettings, saveCustomBoschProfile, type BoschPayloadFormat } from './bluetooth/custom-bosch-profile';
 import { DeviceExplorer, loadExtraServices, saveExtraServices } from './bluetooth/device-explorer';
 import { MeasurementCapture } from './bluetooth/measurement-capture';
 import { selectBluetoothProvider } from './bluetooth/providers/select-bluetooth-provider';
@@ -43,6 +44,7 @@ const navItems: Array<{ id: PrimaryView; label: string }> = [
 export class SiteMeasureApp {
   private readonly root: HTMLElement;
   private readonly repository: LocalStorageProjectRepository;
+  private readonly photoStore = new IndexedDbPhotoStore();
   private readonly bluetoothProvider = selectBluetoothProvider();
   private readonly bluetoothCapture = new MeasurementCapture();
   private bluetoothAdapter: LaserMeasureAdapter | null = null;
@@ -76,6 +78,7 @@ export class SiteMeasureApp {
   private saveState: SaveState = 'idle';
   private saveTime: string | null = null;
   private saveTimer: number | undefined;
+  private pendingPhotoWrites = 0;
   private toastHideTimer: number | undefined;
   private undoTimer: number | undefined;
   private undoDeletion: UndoDeletion | null = null;
@@ -86,8 +89,9 @@ export class SiteMeasureApp {
   private activeEditor: FloorPlanEditor | null = null;
   private editorSelection: EditorSelection = null;
 
-  constructor(root: HTMLElement, repositoryWarning?: RepositoryWarning, private readonly debugLog?: DebugLog) {
+  constructor(root: HTMLElement, repositoryWarning?: RepositoryWarning, private readonly debugLog?: DebugLog, initialNotice = '') {
     this.root = root;
+    this.notice = initialNotice;
     this.repository = new LocalStorageProjectRepository(localStorage, (message) => {
       this.notice = message;
       repositoryWarning?.(message);
@@ -98,7 +102,7 @@ export class SiteMeasureApp {
     }
 
     window.addEventListener('beforeunload', (event) => {
-      if (this.dirty) {
+      if (this.dirty || this.pendingPhotoWrites > 0) {
         event.preventDefault();
       }
     });
@@ -951,9 +955,9 @@ export class SiteMeasureApp {
       return { wrapper, input };
     };
     const displayName = field('Device label', saved?.displayName ?? 'Bosch laser measure', 'Bosch GLM 50-27 C');
-    const namePrefix = field('Bluetooth name prefix', saved?.namePrefix ?? '', 'Bosch GLM');
-    const serviceUuid = field('Service UUID', saved?.serviceUuid ?? '', '0000180f-0000-1000-8000-00805f9b34fb');
-    const characteristicUuid = field('Measurement characteristic UUID', saved?.measurementCharacteristicUuid ?? '', '00002a19-0000-1000-8000-00805f9b34fb');
+    const namePrefix = field('Bluetooth name prefix', saved?.namePrefix ?? DEFAULT_CUSTOM_BOSCH_PROFILE_SETTINGS.namePrefix, 'Bosch GLM');
+    const serviceUuid = field('Service UUID', saved?.serviceUuid ?? DEFAULT_CUSTOM_BOSCH_PROFILE_SETTINGS.serviceUuid, '0000180f-0000-1000-8000-00805f9b34fb');
+    const characteristicUuid = field('Measurement characteristic UUID', saved?.measurementCharacteristicUuid ?? DEFAULT_CUSTOM_BOSCH_PROFILE_SETTINGS.measurementCharacteristicUuid, '00002a19-0000-1000-8000-00805f9b34fb');
     const payloadWrapper = document.createElement('label');
     payloadWrapper.className = 'field';
     const payloadFormat = document.createElement('select');
@@ -1332,7 +1336,14 @@ export class SiteMeasureApp {
     meter.max = 1;
     meter.value = usage.percentUsed ?? 0;
     meter.setAttribute('aria-label', 'Local storage used');
-    storage.append(meter, element('p', '', `${formatBytes(usage.bytesUsed)} of approximately ${formatBytes(usage.quotaBytes ?? 0)} used`));
+    storage.append(meter, element('p', '', `LocalStorage: approximately ${formatBytes(usage.bytesUsed)} of ${formatBytes(usage.quotaBytes ?? 0)} used`));
+    const originUsage = element('p', '', 'Photo storage estimate unavailable.');
+    storage.append(originUsage);
+    if (navigator.storage?.estimate) {
+      void navigator.storage.estimate().then((estimate) => {
+        if (estimate.usage !== undefined && estimate.quota !== undefined) originUsage.textContent = `Browser storage for this site: approximately ${formatBytes(estimate.usage)} of ${formatBytes(estimate.quota)} used`;
+      }).catch(() => undefined);
+    }
     if ((usage.percentUsed ?? 0) >= 0.7) storage.append(element('p', 'storage-warning', 'Device storage is above 70%. Export projects and remove unneeded photos to avoid save failures.'));
     storage.append(element('p', 'storage-warning', 'Clearing Safari website data can delete local projects. Export important projects regularly.'));
     const bluetooth = element('section', 'settings-section');
@@ -1374,7 +1385,7 @@ export class SiteMeasureApp {
         const project = this.repository.get(summary.id);
         return project ? [project] : [];
       });
-      this.downloadText(serializeBackup(projects), `sitemeasure-backup-${new Date().toISOString().slice(0, 10)}.sitemeasure-backup.json`, 'application/json');
+      this.withPortableProjects(projects, (portable) => this.downloadText(serializeBackup(portable), `sitemeasure-backup-${new Date().toISOString().slice(0, 10)}.sitemeasure-backup.json`, 'application/json'));
     }));
     actions.append(button('Restore full backup', 'button quiet stretch', () => this.openBackupPicker()));
     const current = this.selectedProject();
@@ -1480,7 +1491,7 @@ export class SiteMeasureApp {
       const card = element('button', 'photo-card');
       card.type = 'button';
       const image = document.createElement('img');
-      image.src = photo.dataUrl;
+      this.loadPhotoImage(image, photo);
       image.alt = photo.title;
       const text = element('span', 'photo-card-copy');
       text.append(element('strong', '', photo.title), element('small', '', `${formatBytes(photo.sizeBytes)} · ${photo.annotations.length} annotations`));
@@ -1490,6 +1501,22 @@ export class SiteMeasureApp {
     });
     page.append(grid);
     main.append(page);
+  }
+
+  private loadPhotoImage(image: HTMLImageElement, photo: ProjectPhoto): void {
+    if (photo.dataUrl !== undefined) {
+      image.src = photo.dataUrl;
+      return;
+    }
+    void this.photoStore.get(photo.storageId ?? '').then((blob) => {
+      if (!blob) throw new Error(`Photo "${photo.title}" is missing from device storage.`);
+      if (!image.isConnected) return;
+      const url = URL.createObjectURL(blob);
+      const release = () => URL.revokeObjectURL(url);
+      image.addEventListener('load', release, { once: true });
+      image.addEventListener('error', release, { once: true });
+      image.src = url;
+    }).catch((error: unknown) => this.reportPersistenceError(error));
   }
 
   private showPhotoSourceDialog(project: Project, room: Room): void {
@@ -1515,8 +1542,8 @@ export class SiteMeasureApp {
     processingStatus.dataset.photoProcessing = 'true';
     dialog.querySelector('.dialog-content')?.append(processingStatus);
     try {
-      const photo = await processPhoto(file);
-      this.showProcessedPhotoConfirmation(project, room, photo);
+      const { photo, blob } = await processPhoto(file);
+      this.showProcessedPhotoConfirmation(project, room, photo, blob);
     } catch (error) {
       this.debugLog?.log('handled.error', error);
       const message = error instanceof Error ? error.message : 'The photo could not be processed.';
@@ -1527,12 +1554,14 @@ export class SiteMeasureApp {
     }
   }
 
-  private showProcessedPhotoConfirmation(project: Project, room: Room, photo: ProjectPhoto): void {
+  private showProcessedPhotoConfirmation(project: Project, room: Room, photo: ProjectPhoto, blob: Blob): void {
     const dialog = this.dialog();
     const content = element('div', 'dialog-content photo-confirmation');
     content.append(element('p', 'eyebrow', 'Photo processed'), element('h2', 'dialog-title', 'Review site photo'));
     const image = document.createElement('img');
-    image.src = photo.dataUrl;
+    const previewUrl = URL.createObjectURL(blob);
+    image.src = previewUrl;
+    dialog.addEventListener('close', () => URL.revokeObjectURL(previewUrl), { once: true });
     image.alt = photo.title;
     content.append(image, element('p', 'photo-result-size', `${photo.width} × ${photo.height} px · approximately ${formatBytes(photo.sizeBytes)}`));
     const title = document.createElement('input');
@@ -1540,16 +1569,21 @@ export class SiteMeasureApp {
     title.setAttribute('aria-label', 'Photo title');
     const actions = element('div', 'dialog-actions');
     actions.append(button('Cancel', 'button quiet', () => dialog.close()));
-    actions.append(button('Save photo', 'button primary', () => {
+    const savePhoto = button('Save photo', 'button primary', () => {
       photo.title = title.value.trim() || 'Site photo';
-      room.photos.push(photo);
-      project.modifiedAt = new Date().toISOString();
-      if (this.save(project)) {
+      const updated = structuredClone(project);
+      const updatedRoom = updated.buildings.flatMap((building) => building.floors.flatMap((floor) => floor.rooms)).find((candidate) => candidate.id === room.id);
+      if (!updatedRoom) return;
+      updatedRoom.photos.push(photo);
+      updated.modifiedAt = new Date().toISOString();
+      savePhoto.disabled = true;
+      this.saveWithPhotos(updated, () => {
         dialog.close();
         this.showToast(`Photo saved · ${formatBytes(photo.sizeBytes)}`);
         this.render();
-      }
-    }));
+      }, () => dialog.open && dialog.contains(content), () => { savePhoto.disabled = false; }, new Map([[photo.storageId!, blob]]));
+    });
+    actions.append(savePhoto);
     content.append(title, actions);
     dialog.replaceChildren(content);
     this.openDialog(dialog);
@@ -1573,7 +1607,7 @@ export class SiteMeasureApp {
     textInput.setAttribute('aria-label', 'Annotation text');
     const stage = element('div', 'photo-stage');
     const image = document.createElement('img');
-    image.src = photo.dataUrl;
+    this.loadPhotoImage(image, photo);
     image.alt = photo.title;
     image.draggable = false;
     stage.append(image);
@@ -1919,6 +1953,7 @@ export class SiteMeasureApp {
 
   private showBackupPreview(backup: BackupFile): void {
     const dialog = this.dialog();
+    const originalRevision = this.repository.projectStorageRevision();
     const currentProjects = this.repository.list().flatMap((summary) => {
       const project = this.repository.get(summary.id);
       return project ? [project] : [];
@@ -1938,27 +1973,43 @@ export class SiteMeasureApp {
       : 'This replaces the local project list on this device.'));
     const actions = element('div', 'dialog-actions stacked');
     actions.append(button(currentProjects.length ? 'Download current backup & replace' : 'Restore projects', 'button danger stretch', () => {
+      const ensureUnchanged = () => {
+        if (this.repository.projectStorageRevision() !== originalRevision) throw new Error('Local projects changed during backup restore. Reopen the backup and try again.');
+      };
       const restore = () => {
-        if (!dialog.open) return;
-        try {
-          this.repository.replaceAll(backup.projects);
-          this.undoDeletion = null;
-          window.clearTimeout(this.undoTimer);
-          this.undoTimer = undefined;
-          this.selectedProjectId = null;
-          this.activeRoomId = null;
-          this.dirty = false;
-          this.saveState = 'saved';
-          this.saveTime = new Date().toISOString();
-          dialog.close();
-          this.setView('projects');
-          this.showToast('Backup restored');
-        } catch (error) {
-          this.reportPersistenceError(error);
-        }
+        if (!dialog.open || !dialog.contains(content)) return;
+        const replace = (projects: Project[]) => {
+          if (!dialog.open || !dialog.contains(content)) return;
+          try {
+            ensureUnchanged();
+            this.repository.replaceAll(projects);
+            this.undoDeletion = null;
+            window.clearTimeout(this.undoTimer);
+            this.undoTimer = undefined;
+            this.selectedProjectId = null;
+            this.activeRoomId = null;
+            this.dirty = false;
+            this.saveState = 'saved';
+            this.saveTime = new Date().toISOString();
+            dialog.close();
+            this.setView('projects');
+            this.showToast('Backup restored');
+          } catch (error) {
+            this.reportPersistenceError(error);
+          }
+        };
+        if (backup.projects.some((project) => projectPhotos(project).some((photo) => photo.dataUrl !== undefined))) {
+          this.pendingPhotoWrites += 1;
+          void Promise.all(backup.projects.map((project) => externalizePhotos(project, this.photoStore))).then(replace).catch((error: unknown) => this.reportPersistenceError(error)).finally(() => { this.pendingPhotoWrites -= 1; });
+        } else replace(backup.projects);
       };
       try {
-        if (currentProjects.length) this.downloadText(serializeBackup(currentProjects), `sitemeasure-before-restore-${new Date().toISOString().slice(0, 10)}.sitemeasure-backup.json`, 'application/json', restore);
+        ensureUnchanged();
+        if (currentProjects.length) this.withPortableProjects(currentProjects, (portable) => {
+          if (!dialog.open || !dialog.contains(content)) return;
+          ensureUnchanged();
+          this.downloadText(serializeBackup(portable), `sitemeasure-before-restore-${new Date().toISOString().slice(0, 10)}.sitemeasure-backup.json`, 'application/json', restore);
+        });
         else restore();
       } catch (error) { this.reportPersistenceError(error); }
     }));
@@ -1994,26 +2045,26 @@ export class SiteMeasureApp {
     const actions = element('div', 'dialog-actions stacked');
     if (existing) {
       actions.append(button(`Replace local copy: ${existing.name}`, 'button danger stretch', () => {
-        if (this.save(project)) {
+        this.saveWithPhotos(project, () => {
           dialog.close();
           this.openProject(project.id);
-        }
+        }, () => dialog.open && dialog.contains(content));
       }));
     }
     actions.append(button('Import as copy (keep both)', 'button primary stretch', () => {
       const copy = copyImportedProject(project);
-      if (this.save(copy)) {
+      this.saveWithPhotos(copy, () => {
         dialog.close();
         this.openProject(copy.id);
-      }
+      }, () => dialog.open && dialog.contains(content));
     }));
     actions.append(button('Cancel', 'button quiet stretch', () => dialog.close()));
     if (!existing) {
       actions.prepend(button('Import project', 'button primary stretch', () => {
-        if (this.save(project)) {
+        this.saveWithPhotos(project, () => {
           dialog.close();
           this.openProject(project.id);
-        }
+        }, () => dialog.open && dialog.contains(content));
       }));
     }
     content.append(actions);
@@ -2079,6 +2130,10 @@ export class SiteMeasureApp {
   }
 
   private exportProject(project: Project, includePhotos = true): void {
+    if (includePhotos && projectPhotos(project).some((photo) => photo.storageId !== undefined)) {
+      this.withPortableProjects([project], ([portable]) => this.exportProject(portable));
+      return;
+    }
     let stage = 'starting';
     let failureStage: string | undefined;
     const report = (step: string, detail: Record<string, unknown> = {}) => {
@@ -2127,6 +2182,17 @@ export class SiteMeasureApp {
   }
 
   private printReport(project: Project): void {
+    if (projectPhotos(project).some((photo) => photo.storageId !== undefined)) {
+      const printWindow = window.open('', '_blank');
+      if (!printWindow) { this.showToast('Allow pop-ups to open the printable report.'); return; }
+      printWindow.opener = null;
+      void hydratePhotos(project, this.photoStore).then((portable) => {
+        const reportUrl = URL.createObjectURL(new Blob([printableReport(portable)], { type: 'text/html;charset=utf-8' }));
+        printWindow.addEventListener('load', () => { printWindow.print(); URL.revokeObjectURL(reportUrl); }, { once: true });
+        printWindow.location.href = reportUrl;
+      }).catch((error: unknown) => { printWindow.close(); this.reportPersistenceError(error); });
+      return;
+    }
     const reportUrl = URL.createObjectURL(new Blob([printableReport(project)], { type: 'text/html;charset=utf-8' }));
     const printWindow = window.open(reportUrl, '_blank');
     if (!printWindow) {
@@ -2284,6 +2350,32 @@ export class SiteMeasureApp {
     this.renderSaveIndicator();
     window.clearTimeout(this.saveTimer);
     this.saveTimer = window.setTimeout(() => this.save(project), 650);
+  }
+
+  private saveWithPhotos(project: Project, onSaved: () => void, shouldSave = () => true, onComplete = () => {}, newBlobs: ReadonlyMap<string, Blob> = new Map()): void {
+    if (!newBlobs.size && !projectPhotos(project).some((photo) => photo.dataUrl !== undefined)) {
+      if (shouldSave() && this.save(project)) onSaved();
+      onComplete();
+      return;
+    }
+    const key = `${STORAGE_KEYS.projectPrefix}${project.id}`;
+    const original = localStorage.getItem(key);
+    this.pendingPhotoWrites += 1;
+    void externalizePhotos(project, this.photoStore).then(async (stored) => {
+      await this.photoStore.put(newBlobs);
+      if (!shouldSave()) return;
+      if (localStorage.getItem(key) !== original) throw new Error('The project changed while photos were being saved. Reopen it and try again.');
+      if (this.save(stored)) onSaved();
+    }).catch((error: unknown) => this.reportPersistenceError(error)).finally(() => { this.pendingPhotoWrites -= 1; onComplete(); });
+  }
+
+  private withPortableProjects(projects: Project[], onReady: (projects: Project[]) => void): void {
+    if (!projects.some((project) => projectPhotos(project).some((photo) => photo.storageId !== undefined))) {
+      try { onReady(projects); } catch (error) { this.reportPersistenceError(error); }
+      return;
+    }
+    void Promise.all(projects.map((project) => hydratePhotos(project, this.photoStore)))
+      .then(onReady).catch((error: unknown) => this.reportPersistenceError(error));
   }
 
   private save(project: Project): boolean {

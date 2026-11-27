@@ -44,6 +44,28 @@ describe('Bosch profile validation', () => {
 });
 
 describe('custom Bosch profiles', () => {
+  it('uses editable GLM100 defaults in the Bluetooth settings dialog', () => {
+    localStorage.clear();
+    const root = document.createElement('div');
+    document.body.append(root);
+    const app = new SiteMeasureApp(root) as unknown as { showBluetoothSettingsDialog(): void };
+    const dialog = root.querySelector<HTMLDialogElement>('dialog')!;
+    dialog.showModal = () => dialog.setAttribute('open', '');
+    dialog.close = () => dialog.removeAttribute('open');
+
+    app.showBluetoothSettingsDialog();
+
+    const inputs = dialog.querySelectorAll<HTMLInputElement>('input[type="text"]');
+    expect(inputs[1].value).toBe('GLM100-');
+    expect(inputs[2].value).toBe('FDE8');
+    expect(inputs[3].value).toBe('02A6C0D2-0451-4000-B000-FB3210111989');
+    inputs[2].value = 'ABCD';
+    [...dialog.querySelectorAll('button')].find((item) => item.textContent === 'Save profile')!.click();
+    expect(loadCustomBoschProfileSettings(localStorage)?.serviceUuid).toBe('ABCD');
+
+    root.remove();
+  });
+
   it('persists a configurable profile and decodes its measurement payload', () => {
     const settings = {
       displayName: 'My Bosch GLM',

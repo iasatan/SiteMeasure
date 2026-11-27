@@ -24,7 +24,11 @@ The production output is written to `dist/` and uses relative asset paths for Gi
 
 ## Project data and privacy
 
-Projects are stored only in browser `localStorage`. SiteMeasure does not transmit project data and contains no analytics, authentication, or backend service. Clearing Safari website data can delete local projects, so export important projects regularly.
+Project metadata is stored in browser `localStorage`; photo files are stored as binary blobs in IndexedDB. SiteMeasure does not transmit project data and contains no analytics, authentication, or backend service. Clearing browser website data can delete both, so export important projects regularly.
+
+Existing embedded photos are migrated when the app opens. A photo is written to IndexedDB before its project is updated; if migration fails, the original project remains available and the app shows a warning. IndexedDB must be available to add or import photos. Project and backup exports include the images and remain compatible with existing files. Storage estimates are browser-dependent and the site-wide estimate includes IndexedDB as well as other site data.
+
+To protect duplicated projects, undo, and other open tabs, unreferenced photo blobs are not automatically deleted. Deleting photos or projects may therefore not immediately reclaim IndexedDB space. Export a full backup before clearing site data; restoring it recreates the photos still in the backup.
 
 Project exports use `*.sitemeasure.json`; full local-workspace backups use `*.sitemeasure-backup.json`. Restoring a full backup replaces every local project after requesting a download of the current projects. Keep that recovery file before continuing.
 

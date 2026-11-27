@@ -14,7 +14,7 @@ export function resizedDimensions(width: number, height: number, maxDimension: n
   return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) };
 }
 
-export async function processPhoto(file: File, options: PhotoProcessingOptions = {}): Promise<ProjectPhoto> {
+export async function processPhoto(file: File, options: PhotoProcessingOptions = {}): Promise<{ photo: ProjectPhoto; blob: Blob }> {
   if (!file.type.startsWith('image/')) throw new Error('Choose an image file.');
   if (file.size > MAX_SOURCE_BYTES) throw new Error('The selected photo is larger than the 30 MB processing limit.');
 
@@ -33,12 +33,11 @@ export async function processPhoto(file: File, options: PhotoProcessingOptions =
     context.fillRect(0, 0, dimensions.width, dimensions.height);
     context.drawImage(bitmap, 0, 0, dimensions.width, dimensions.height);
     const blob = await canvasBlob(canvas, mimeType, quality);
-    const dataUrl = await blobDataUrl(blob);
-    return {
+    const photo: ProjectPhoto = {
       id: createId(),
       title: file.name.replace(/\.[^.]+$/, '') || 'Site photo',
       notes: '',
-      dataUrl,
+      storageId: createId(),
       mimeType: blob.type === 'image/webp' ? 'image/webp' : 'image/jpeg',
       width: dimensions.width,
       height: dimensions.height,
@@ -46,6 +45,7 @@ export async function processPhoto(file: File, options: PhotoProcessingOptions =
       capturedAt: new Date().toISOString(),
       annotations: [],
     };
+    return { photo, blob };
   } finally {
     bitmap.close();
   }
@@ -62,14 +62,5 @@ async function decodeImage(file: File): Promise<ImageBitmap> {
 function canvasBlob(canvas: HTMLCanvasElement, mimeType: string, quality: number): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('The photo could not be compressed.')), mimeType, quality);
-  });
-}
-
-function blobDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.addEventListener('load', () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('The photo could not be encoded.')));
-    reader.addEventListener('error', () => reject(new Error('The photo could not be encoded.')));
-    reader.readAsDataURL(blob);
   });
 }

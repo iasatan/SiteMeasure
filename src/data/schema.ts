@@ -107,10 +107,14 @@ function validateRoom(value: unknown, path: string): void {
     expectString(photo.id, `${photoPath}.id`, false);
     expectString(photo.title, `${photoPath}.title`);
     expectString(photo.notes, `${photoPath}.notes`);
-    if (typeof photo.dataUrl !== 'string' || photo.dataUrl.length > 8 * 1024 * 1024) throw new ProjectValidationError(`${photoPath}.dataUrl is invalid or too large.`);
     if (!['image/jpeg', 'image/webp'].includes(String(photo.mimeType))) throw new ProjectValidationError(`${photoPath}.mimeType is invalid.`);
-    const expectedPrefix = `data:${String(photo.mimeType)};base64,`;
-    if (!String(photo.dataUrl).startsWith(expectedPrefix)) throw new ProjectValidationError(`${photoPath}.dataUrl does not match its MIME type.`);
+    if (photo.dataUrl !== undefined) {
+      if (typeof photo.dataUrl !== 'string' || photo.dataUrl.length > 8 * 1024 * 1024) throw new ProjectValidationError(`${photoPath}.dataUrl is invalid or too large.`);
+      const expectedPrefix = `data:${String(photo.mimeType)};base64,`;
+      if (!photo.dataUrl.startsWith(expectedPrefix)) throw new ProjectValidationError(`${photoPath}.dataUrl does not match its MIME type.`);
+    }
+    if (photo.storageId !== undefined) expectString(photo.storageId, `${photoPath}.storageId`, false);
+    if ((photo.dataUrl === undefined) === (photo.storageId === undefined)) throw new ProjectValidationError(`${photoPath} must have exactly one photo source.`);
     expectFinite(photo.width, `${photoPath}.width`, 1, 10_000);
     expectFinite(photo.height, `${photoPath}.height`, 1, 10_000);
     expectFinite(photo.sizeBytes, `${photoPath}.sizeBytes`, 1, 10 * 1024 * 1024);

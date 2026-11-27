@@ -4,8 +4,6 @@ import type { ParsedMeasurement } from './types';
 
 export const CUSTOM_BOSCH_PROFILE_STORAGE_KEY = 'sitemeasure:custom-bosch-profile';
 const BOSCH_MEASUREMENT_CHARACTERISTIC_UUID = '02a6c0d2-0451-4000-b000-fb3210111989';
-// The GLM exposes this characteristic only under the 0xFDE8 service.
-const BOSCH_MEASUREMENT_SERVICE_UUID = 'fde8';
 
 export type BoschPayloadFormat = 'bosch-glm20' | 'float32-le-m' | 'uint32-le-mm' | 'uint32-le-0.1mm' | 'uint16-le-mm';
 
@@ -17,6 +15,12 @@ export interface CustomBoschProfileSettings {
   payloadFormat: BoschPayloadFormat;
   byteOffset: number;
 }
+
+export const DEFAULT_CUSTOM_BOSCH_PROFILE_SETTINGS = {
+  namePrefix: 'GLM100-',
+  serviceUuid: 'FDE8',
+  measurementCharacteristicUuid: '02A6C0D2-0451-4000-B000-FB3210111989',
+};
 
 export function loadCustomBoschProfile(storage: Storage): BoschDeviceProfile | null {
   const raw = storage.getItem(CUSTOM_BOSCH_PROFILE_STORAGE_KEY);
@@ -34,10 +38,6 @@ export function loadCustomBoschProfileSettings(storage: Storage): CustomBoschPro
   if (!raw) return null;
   try {
     const value = JSON.parse(raw) as CustomBoschProfileSettings;
-    if (value.measurementCharacteristicUuid?.toLowerCase() === BOSCH_MEASUREMENT_CHARACTERISTIC_UUID) {
-      value.payloadFormat = 'bosch-glm20';
-      value.serviceUuid = BOSCH_MEASUREMENT_SERVICE_UUID;
-    }
     createCustomBoschProfile(value);
     return value;
   } catch {
@@ -61,7 +61,7 @@ export function createCustomBoschProfile(value: Partial<CustomBoschProfileSettin
   const settings: CustomBoschProfileSettings = {
     displayName: typeof value.displayName === 'string' ? value.displayName.trim() : '',
     namePrefix: typeof value.namePrefix === 'string' ? value.namePrefix.trim() : '',
-    serviceUuid: measurementCharacteristicUuid === BOSCH_MEASUREMENT_CHARACTERISTIC_UUID ? BOSCH_MEASUREMENT_SERVICE_UUID : typeof value.serviceUuid === 'string' ? value.serviceUuid.trim().toLowerCase() : '',
+    serviceUuid: typeof value.serviceUuid === 'string' ? value.serviceUuid.trim().toLowerCase() : '',
     measurementCharacteristicUuid,
     payloadFormat: measurementCharacteristicUuid === BOSCH_MEASUREMENT_CHARACTERISTIC_UUID ? 'bosch-glm20' : requestedPayloadFormat,
     byteOffset: Number.isInteger(value.byteOffset) && Number(value.byteOffset) >= 0 ? Number(value.byteOffset) : 0,

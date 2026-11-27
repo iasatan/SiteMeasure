@@ -90,7 +90,8 @@ export interface ProjectPhoto {
   id: string;
   title: string;
   notes: string;
-  dataUrl: string;
+  dataUrl?: string;
+  storageId?: string;
   mimeType: 'image/jpeg' | 'image/webp';
   width: number;
   height: number;

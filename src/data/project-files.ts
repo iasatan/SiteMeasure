@@ -1,5 +1,6 @@
 import { APPLICATION_VERSION, type Project } from '../domain/models';
 import { remapProjectIds } from './local-storage-repository';
+import { projectPhotos } from './photo-store';
 import { ProjectValidationError, validateProject } from './schema';
 
 export const PROJECT_FILE_VERSION = 1;
@@ -23,13 +24,21 @@ export interface BackupFile {
   projects: Project[];
 }
 
+function portableProject(value: unknown): Project {
+  const project = validateProject(value);
+  if (projectPhotos(project).some((photo) => photo.dataUrl === undefined)) {
+    throw new ProjectValidationError('Project files must contain their photo data.');
+  }
+  return project;
+}
+
 export function createProjectFile(project: Project): ProjectFile {
   return {
     format: 'sitemeasure-project',
     formatVersion: PROJECT_FILE_VERSION,
     exportedAt: new Date().toISOString(),
     applicationVersion: APPLICATION_VERSION,
-    project: validateProject(project),
+    project: portableProject(project),
   };
 }
 
@@ -43,7 +52,7 @@ export function serializeBackup(projects: Project[]): string {
     formatVersion: BACKUP_FILE_VERSION,
     exportedAt: new Date().toISOString(),
     applicationVersion: APPLICATION_VERSION,
-    projects: projects.map(validateProject),
+    projects: projects.map(portableProject),
   };
   return JSON.stringify(file, null, 2);
 }
@@ -75,7 +84,7 @@ export function parseBackupFile(text: string): BackupFile {
   if (typeof file.exportedAt !== 'string' || Number.isNaN(Date.parse(file.exportedAt))) throw new ProjectValidationError('The backup export date is invalid.');
   if (typeof file.applicationVersion !== 'string') throw new ProjectValidationError('The backup application version is invalid.');
   if (!Array.isArray(file.projects)) throw new ProjectValidationError('The backup project list is invalid.');
-  const projects = file.projects.map(validateProject);
+  const projects = file.projects.map(portableProject);
   if (new Set(projects.map((project) => project.id)).size !== projects.length) {
     throw new ProjectValidationError('The backup contains duplicate project IDs.');
   }
@@ -131,7 +140,7 @@ export function parseProjectFile(text: string): ProjectFile {
     formatVersion: PROJECT_FILE_VERSION,
     exportedAt: file.exportedAt,
     applicationVersion: file.applicationVersion,
-    project: validateProject(file.project),
+    project: portableProject(file.project),
   };
 }
 

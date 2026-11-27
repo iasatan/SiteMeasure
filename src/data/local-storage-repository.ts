@@ -8,6 +8,7 @@ import {
   type StorageUsage,
 } from '../domain/models';
 import { migrateProject, ProjectValidationError, validateProject } from './schema';
+import { externalizePhotos, projectPhotos, type PhotoBlobStore } from './photo-store';
 
 export const STORAGE_KEYS = {
   settings: 'sitemeasure:settings',
@@ -56,6 +57,18 @@ export class LocalStorageProjectRepository implements ProjectRepository {
     } catch {
       this.warn(`Project ${projectId} could not be opened. Its stored data was left unchanged.`);
       return null;
+    }
+  }
+
+  async migratePhotos(store: PhotoBlobStore): Promise<void> {
+    for (const summary of this.list()) {
+      const key = this.projectKey(summary.id);
+      const original = this.storage.getItem(key);
+      const project = this.get(summary.id);
+      if (!original || !project || !projectPhotos(project).some((photo) => photo.dataUrl !== undefined)) continue;
+      const migrated = await externalizePhotos(project, store);
+      if (this.storage.getItem(key) !== original) throw new ProjectPersistenceError('A project changed during photo migration. Reload to try again.');
+      this.save(migrated);
     }
   }
 
@@ -118,6 +131,11 @@ export class LocalStorageProjectRepository implements ProjectRepository {
       if (value !== null) projects.set(key, value);
     }
     return { projects, index: this.storage.getItem(STORAGE_KEYS.projectIndex) };
+  }
+
+  projectStorageRevision(): string {
+    const snapshot = this.snapshotProjectStorage();
+    return JSON.stringify([snapshot.index, [...snapshot.projects].sort(([left], [right]) => left.localeCompare(right))]);
   }
 
   private writeProjectSet(projects: Project[]): void {
