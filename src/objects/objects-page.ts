@@ -5,6 +5,9 @@ import {
   descendantIds,
   scaleParts,
   createPart,
+  groundAndCenter,
+  mirrorParts,
+  snapValue,
   objectFilename,
   OBJECT_PRESETS,
   MAX_PARTS,
@@ -30,6 +33,10 @@ export interface ObjectsPageHost {
   confirm(message: string, onConfirm: () => void): void;
 }
 
+const EXPERT_KEY = 'sitemeasure.objects.expert';
+const HISTORY_LIMIT = 50;
+const STEPS_METERS = [0.01, 0.05, 0.1, 0.25];
+
 const PUBLISH_REPOSITORY_URL = 'https://github.com/iasatan/SiteMeasure';
 
 type DimensionKey = 'xMeters' | 'yMeters' | 'zMeters' | 'widthMeters' | 'heightMeters' | 'depthMeters';
@@ -52,6 +59,11 @@ export class ObjectsPage {
   private container: HTMLElement | null = null;
   private targetProjectId: string | null = null;
   private targetRoomId: string | null = null;
+  private expert = readExpert();
+  private stepMeters = 0.05;
+  private snap = true;
+  private undoStack: ObjectPart[][] = [];
+  private redoStack: ObjectPart[][] = [];
 
   constructor(private readonly library: ObjectLibrary, private readonly host: ObjectsPageHost) {
     this.previewHost.className = 'object-preview';
@@ -83,8 +95,10 @@ export class ObjectsPage {
 
   private rerender(): void {
     if (!this.container) return;
+    const scroll = window.scrollY;
     this.container.replaceChildren();
     this.render(this.container);
+    window.scrollTo(0, scroll);
   }
 
   private startNew(): void {
@@ -92,6 +106,28 @@ export class ObjectsPage {
     this.draft.layer = this.host.layer();
     this.selectedPartId = this.draft.parts[0].id;
     this.message = '';
+    this.resetHistory();
+    this.rerender();
+  }
+
+  private resetHistory(): void {
+    this.undoStack = [];
+    this.redoStack = [];
+  }
+
+  /** Call before every change to the parts so it can be undone. */
+  private pushHistory(): void {
+    this.undoStack.push(this.draft.parts.map((part) => ({ ...part })));
+    if (this.undoStack.length > HISTORY_LIMIT) this.undoStack.shift();
+    this.redoStack = [];
+  }
+
+  private restore(from: ObjectPart[][], to: ObjectPart[][]): void {
+    const snapshot = from.pop();
+    if (!snapshot) return;
+    to.push(this.draft.parts.map((part) => ({ ...part })));
+    this.draft.parts = snapshot;
+    if (!snapshot.some((part) => part.id === this.selectedPartId)) this.selectedPartId = snapshot[0]?.id ?? null;
     this.rerender();
   }
 
@@ -144,6 +180,7 @@ export class ObjectsPage {
         this.draft = { ...object, parts: object.parts.map((part) => ({ ...part })) };
         this.selectedPartId = this.draft.parts[0]?.id ?? null;
         this.message = '';
+        this.resetHistory();
         this.rerender();
       }));
       const insert = btn('Insert', 'button primary compact', () => this.host.insert(object, projectId!, roomId!));
@@ -187,7 +224,16 @@ export class ObjectsPage {
 
   private editor(): HTMLElement {
     const section = el('section', 'settings-section object-editor');
-    section.append(el('h2', '', 'Object editor'));
+    const head = el('div', 'object-editor-head');
+    head.append(el('h2', '', 'Object editor'));
+    const toggle = btn(this.expert ? 'Expert mode: on' : 'Expert mode: off', this.expert ? 'button primary compact' : 'button quiet compact', () => {
+      this.expert = !this.expert;
+      try { localStorage.setItem(EXPERT_KEY, this.expert ? '1' : '0'); } catch { /* storage unavailable */ }
+      this.rerender();
+    });
+    toggle.setAttribute('aria-pressed', String(this.expert));
+    head.append(toggle);
+    section.append(head);
 
     const nameLabel = el('label', 'field');
     const name = document.createElement('input');
@@ -215,6 +261,7 @@ export class ObjectsPage {
     preset.addEventListener('change', () => {
       const chosen = OBJECT_PRESETS[Number(preset.value)];
       if (!chosen) return;
+      this.pushHistory();
       this.draft.parts = chosen.build();
       if (!name.value.trim() || name.value === 'New object') this.draft.name = chosen.label;
       this.selectedPartId = this.draft.parts[0].id;
@@ -233,7 +280,10 @@ export class ObjectsPage {
       input.value = String(round(value));
       input.addEventListener('change', () => {
         const next = Number(input.value);
-        if (Number.isFinite(next) && next >= 0.01 && next <= 100) scaleParts(this.draft.parts, { [key]: next });
+        if (Number.isFinite(next) && next >= 0.01 && next <= 100) {
+          this.pushHistory();
+          scaleParts(this.draft.parts, { [key]: next });
+        }
         this.rerender();
       });
       wrapper.append(el('span', 'field-label', label), input);
@@ -245,7 +295,7 @@ export class ObjectsPage {
       [current.widthMeters, current.heightMeters, current.depthMeters].forEach((value, index) => { inputs[index].value = String(round(value)); });
     };
 
-    section.append(nameLabel, presetLabel, this.previewHost, dims, el('p', 'field-hint', 'Changing the overall size scales every part, so attached parts stay together.'), this.partsEditor(updateDims));
+    section.append(nameLabel, presetLabel, this.previewHost, ...(this.expert ? [this.expertToolbar()] : []), dims, el('p', 'field-hint', 'Changing the overall size scales every part, so attached parts stay together.'), this.partsEditor(updateDims));
 
     const error = el('p', this.message.startsWith('Saved') ? 'field-hint' : 'field-error', this.message);
     error.setAttribute('role', 'alert');
@@ -271,6 +321,7 @@ export class ObjectsPage {
     });
     const add = btn('Add part', 'button quiet compact', () => {
       if (this.draft.parts.length >= MAX_PARTS) return;
+      this.pushHistory();
       const part = createPart();
       this.draft.parts.push(part);
       this.selectedPartId = part.id;
@@ -293,6 +344,7 @@ export class ObjectsPage {
     shape.append(new Option('Box', 'box'), new Option('Cylinder', 'cylinder'));
     shape.value = selected.shape;
     shape.addEventListener('change', () => {
+      this.pushHistory();
       selected.shape = shape.value === 'cylinder' ? 'cylinder' : 'box';
       this.rerender();
     });
@@ -313,6 +365,7 @@ export class ObjectsPage {
           input.value = String(round(selected[field.key]));
           return;
         }
+        this.pushHistory();
         applyPartChange(this.draft.parts, selected.id, { [field.key]: value });
         refresh();
       });
@@ -329,6 +382,7 @@ export class ObjectsPage {
     });
     attach.value = selected.parentId ?? '';
     attach.addEventListener('change', () => {
+      this.pushHistory();
       if (attach.value) selected.parentId = attach.value;
       else delete selected.parentId;
     });
@@ -339,18 +393,26 @@ export class ObjectsPage {
     const color = document.createElement('input');
     color.type = 'color';
     color.value = selected.color;
+    color.addEventListener('focus', () => this.pushHistory());
     color.addEventListener('input', () => {
       selected.color = color.value;
       refresh();
     });
     colorLabel.append(el('span', 'field-label', 'Colour'), color);
     grid.append(colorLabel);
-    wrap.append(grid);
+    if (this.expert) {
+      const details = el('details', 'object-expert-details');
+      details.append(el('summary', '', 'Exact values'), grid);
+      wrap.append(this.expertTools(selected), details);
+    } else {
+      wrap.append(grid);
+    }
 
     const actions = el('div', 'dialog-actions');
     actions.append(
       btn('Duplicate part', 'button quiet compact', () => {
         if (this.draft.parts.length >= MAX_PARTS) return;
+        this.pushHistory();
         const copy: ObjectPart = { ...selected, id: createId(), xMeters: selected.xMeters + 0.1 };
         this.draft.parts.push(copy);
         this.selectedPartId = copy.id;
@@ -362,6 +424,7 @@ export class ObjectsPage {
           this.rerender();
           return;
         }
+        this.pushHistory();
         this.draft.parts = this.draft.parts.filter((part) => part.id !== selected.id);
         for (const part of this.draft.parts) {
           if (part.parentId !== selected.id) continue;
@@ -374,6 +437,72 @@ export class ObjectsPage {
     );
     wrap.append(actions);
     return wrap;
+  }
+
+  private expertToolbar(): HTMLElement {
+    const bar = el('div', 'object-expert-bar');
+    const undo = btn('Undo', 'button quiet compact', () => this.restore(this.undoStack, this.redoStack));
+    undo.disabled = !this.undoStack.length;
+    const redo = btn('Redo', 'button quiet compact', () => this.restore(this.redoStack, this.undoStack));
+    redo.disabled = !this.redoStack.length;
+    const whole = (label: string, action: () => void) => btn(label, 'button quiet compact', () => {
+      this.pushHistory();
+      action();
+      this.rerender();
+    });
+    bar.append(
+      undo,
+      redo,
+      whole('Drop to floor', () => groundAndCenter(this.draft.parts)),
+      whole('Mirror ↔', () => mirrorParts(this.draft.parts, 'x')),
+      whole('Mirror ↕', () => mirrorParts(this.draft.parts, 'z')),
+    );
+    return bar;
+  }
+
+  /** Large touch-friendly step buttons for moving and resizing the selected part. */
+  private expertTools(selected: ObjectPart): HTMLElement {
+    const panel = el('div', 'object-expert');
+    const steps = el('div', 'object-expert-steps');
+    steps.setAttribute('role', 'group');
+    steps.setAttribute('aria-label', 'Step size');
+    for (const step of STEPS_METERS) {
+      steps.append(btn(`${step * 100} cm`, step === this.stepMeters ? 'button primary compact' : 'button quiet compact', () => { this.stepMeters = step; this.rerender(); }));
+    }
+    const snap = btn(this.snap ? 'Snap: on' : 'Snap: off', this.snap ? 'button primary compact' : 'button quiet compact', () => { this.snap = !this.snap; this.rerender(); });
+    snap.setAttribute('aria-pressed', String(this.snap));
+    steps.append(snap);
+    panel.append(steps);
+
+    const change = (key: DimensionKey, direction: number, size: boolean) => {
+      const raw = selected[key] + direction * this.stepMeters;
+      const next = this.snap ? snapValue(raw, this.stepMeters) : round(raw);
+      if (size ? next < 0.01 || next > 100 : Math.abs(next) > 100) return;
+      this.pushHistory();
+      applyPartChange(this.draft.parts, selected.id, { [key]: next });
+      this.rerender();
+    };
+    const group = (title: string, size: boolean, axes: Array<[string, DimensionKey]>) => {
+      const box = el('div', 'object-expert-group');
+      box.append(el('span', 'field-label', title));
+      const pad = el('div', 'object-expert-pad');
+      for (const [label, key] of axes) {
+        const cell = el('div', 'object-expert-axis');
+        cell.append(
+          btn('−', 'button quiet', () => change(key, -1, size)),
+          el('span', '', `${label} ${round(selected[key])}`),
+          btn('+', 'button quiet', () => change(key, 1, size)),
+        );
+        pad.append(cell);
+      }
+      box.append(pad);
+      return box;
+    };
+    panel.append(
+      group('Move (m)', false, [['X', 'xMeters'], ['Y up', 'yMeters'], ['Z', 'zMeters']]),
+      group('Size (m)', true, [['W', 'widthMeters'], ['H', 'heightMeters'], ['D', 'depthMeters']]),
+    );
+    return panel;
   }
 
   private saveDraft(confirmed = false): void {
@@ -453,6 +582,10 @@ export class ObjectsPage {
     });
     input.click();
   }
+}
+
+function readExpert(): boolean {
+  try { return localStorage.getItem(EXPERT_KEY) === '1'; } catch { return false; }
 }
 
 function round(value: number): number {

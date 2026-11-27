@@ -176,6 +176,34 @@ export function scaleParts(parts: ObjectPart[], size: { widthMeters?: number; he
   }
 }
 
+/** Rounds to the nearest multiple of step; a non-positive step disables snapping. */
+export function snapValue(value: number, step: number): number {
+  if (!(step > 0)) return value;
+  return Math.round(Math.round(value / step) * step * 1e6) / 1e6;
+}
+
+/** Moves the whole object so its lowest point rests on y = 0 and it is centred on x/z. */
+export function groundAndCenter(parts: ObjectPart[]): void {
+  if (!parts.length) return;
+  const bounds = partBounds(parts);
+  const dx = -(bounds.min.x + bounds.max.x) / 2;
+  const dz = -(bounds.min.z + bounds.max.z) / 2;
+  const dy = -bounds.min.y;
+  for (const part of parts) {
+    part.xMeters += dx;
+    part.yMeters += dy;
+    part.zMeters += dz;
+  }
+}
+
+/** Mirrors every part across the object's centre plane on the given horizontal axis. */
+export function mirrorParts(parts: ObjectPart[], axis: 'x' | 'z'): void {
+  const bounds = partBounds(parts);
+  const key = axis === 'x' ? 'xMeters' : 'zMeters';
+  const centre = axis === 'x' ? (bounds.min.x + bounds.max.x) / 2 : (bounds.min.z + bounds.max.z) / 2;
+  for (const part of parts) part[key] = 2 * centre - part[key];
+}
+
 /** Ids of every part attached, directly or indirectly, to the given part. */
 export function descendantIds(parts: ObjectPart[], id: string): Set<string> {
   const result = new Set<string>();
