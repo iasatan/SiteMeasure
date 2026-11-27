@@ -3,6 +3,7 @@ import { ObjectLibrary } from './data/object-library';
 import { cloneParts, partBounds, type ObjectDefinition } from './domain/furniture';
 import { ObjectsPage } from './objects/objects-page';
 import { ScanPage } from './scan/scan-page';
+import { SpeedometerPage } from './speedometer/speedometer-page';
 import { LocalStorageProjectRepository, type RepositoryWarning } from './data/local-storage-repository';
 import { createId, createProject, createRoom, DEFAULT_DOOR_HEIGHT_METERS, DEFAULT_WINDOW_HEIGHT_METERS, type EditingLayer, type PhotoAnnotation, type Project, type ProjectPhoto, type ProjectSummary, type Room } from './domain/models';
 import { FloorPlanEditor, type ClearanceSide, type EditorSelection } from './editor/floor-plan-editor';
@@ -18,8 +19,8 @@ import { processPhoto } from './photos/photo-processing';
 import { floorPlanSvg, measurementsCsv, printableReport, svgToPng } from './reports/project-exports';
 import type { DebugLog } from './debug-log';
 
-type PrimaryView = 'projects' | 'plan' | 'objects' | 'measure' | 'photos' | 'more' | 'ble' | 'scan';
-const primaryViews: readonly string[] = ['projects', 'plan', 'objects', 'measure', 'photos', 'more', 'ble', 'scan'];
+type PrimaryView = 'projects' | 'plan' | 'objects' | 'measure' | 'photos' | 'more' | 'misc' | 'ble' | 'scan' | 'speedometer';
+const primaryViews: readonly string[] = ['projects', 'plan', 'objects', 'measure', 'photos', 'more', 'misc', 'ble', 'scan', 'speedometer'];
 const isPrimaryView = (value: string): value is PrimaryView => primaryViews.includes(value);
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
@@ -35,6 +36,7 @@ const navItems: Array<{ id: PrimaryView; label: string }> = [
   { id: 'measure', label: 'Measure' },
   { id: 'photos', label: 'Photos' },
   { id: 'more', label: 'More' },
+  { id: 'misc', label: 'Misc' },
 ];
 
 export class SiteMeasureApp {
@@ -63,7 +65,8 @@ export class SiteMeasureApp {
     toast: (message) => this.showToast(message),
     confirm: (message, onConfirm) => this.showConfirmationDialog('Replace saved object?', message, onConfirm),
   });
-  private readonly scanPage = new ScanPage(localStorage, (message) => this.showToast(message), (text, filename, mimeType) => this.downloadText(text, filename, mimeType));
+  private readonly scanPage = new ScanPage(localStorage, (message) => this.showToast(message), (text, filename, mimeType) => this.downloadText(text, filename, mimeType), () => this.setView('misc'));
+  private readonly speedometerPage = new SpeedometerPage(localStorage, (message) => this.showToast(message), () => this.setView('misc'));
   private view: PrimaryView = 'projects';
   private layer: EditingLayer = 'builder';
   private selectedProjectId: string | null = null;
@@ -106,10 +109,10 @@ export class SiteMeasureApp {
   private syncHiddenRoute(): void {
     const route = window.location.hash.replace(/^#\/?/, '');
     if (isPrimaryView(route)) {
-      if (this.view === 'scan' && route !== 'scan') this.scanPage.dispose();
+      this.disposeFeature(route);
       this.view = route;
-    } else if (this.view === 'scan') {
-      this.scanPage.dispose();
+    } else if (this.view === 'scan' || this.view === 'speedometer') {
+      this.disposeFeature('projects');
       this.view = 'projects';
     }
   }
@@ -169,8 +172,9 @@ export class SiteMeasureApp {
       if (item.id === 'objects' && this.layer === 'builder') continue;
       const button = document.createElement('button');
       button.type = 'button';
-      button.className = item.id === this.view ? 'nav-item is-active' : 'nav-item';
-      button.setAttribute('aria-current', item.id === this.view ? 'page' : 'false');
+      const active = item.id === this.view || (item.id === 'misc' && (this.view === 'scan' || this.view === 'speedometer'));
+      button.className = active ? 'nav-item is-active' : 'nav-item';
+      button.setAttribute('aria-current', item.id === this.view ? 'page' : active ? 'location' : 'false');
       const glyph = document.createElement('span');
       glyph.className = 'nav-glyph';
       glyph.setAttribute('aria-hidden', 'true');
@@ -208,15 +212,39 @@ export class SiteMeasureApp {
       case 'more':
         this.renderMore(main);
         break;
+      case 'misc':
+        this.renderMisc(main);
+        break;
       case 'ble':
         this.renderBleExplorer(main);
         break;
       case 'scan':
         this.scanPage.render(main);
         break;
+      case 'speedometer':
+        this.speedometerPage.render(main);
+        break;
     }
     this.renderSaveIndicator();
     this.renderNotice();
+  }
+
+  private renderMisc(main: HTMLElement): void {
+    const page = element('section', 'page misc-page');
+    const heading = element('div', 'page-heading');
+    heading.append(element('h1', '', 'Misc'));
+    const list = element('ul', 'misc-feature-list');
+    for (const [label, view] of [['Scan', 'scan'], ['Speedometer', 'speedometer']] as const) {
+      const item = element('li');
+      const open = button(label, 'misc-feature-button', () => this.setView(view));
+      const arrow = element('span', '', '→');
+      arrow.setAttribute('aria-hidden', 'true');
+      open.append(arrow);
+      item.append(open);
+      list.append(item);
+    }
+    page.append(heading, list);
+    main.append(page);
   }
 
   private renderProjects(main: HTMLElement): void {
@@ -2227,13 +2255,21 @@ export class SiteMeasureApp {
   }
 
   private setView(view: PrimaryView): void {
-    if (this.view === 'scan' && view !== 'scan') {
-      this.scanPage.dispose();
-    }
+    const fromMiscToFeature = this.view === 'misc' && (view === 'scan' || view === 'speedometer');
+    this.disposeFeature(view);
     const hash = view === 'projects' ? '' : `#${view}`;
-    if (window.location.hash !== hash) history.replaceState(null, '', window.location.pathname + window.location.search + hash);
+    if (window.location.hash !== hash) {
+      const url = window.location.pathname + window.location.search + hash;
+      if (fromMiscToFeature) history.pushState(null, '', url);
+      else history.replaceState(null, '', url);
+    }
     this.view = view;
     this.render();
+  }
+
+  private disposeFeature(next: PrimaryView): void {
+    if (this.view === 'scan' && next !== 'scan') this.scanPage.dispose();
+    if (this.view === 'speedometer' && next !== 'speedometer') this.speedometerPage.dispose();
   }
 
   private scheduleSave(project: Project): void {
@@ -2404,7 +2440,7 @@ function formValue(formData: FormData, name: string): string {
 }
 
 function navSymbol(view: PrimaryView): string {
-  return { projects: 'P', plan: '⌜', objects: '▣', measure: '↕', photos: '□', more: '…', ble: 'B', scan: 'S' }[view];
+  return { projects: 'P', plan: '⌜', objects: '▣', measure: '↕', photos: '□', more: '…', misc: 'M', ble: 'B', scan: 'S', speedometer: 'S' }[view];
 }
 
 function formatDate(value: string): string {

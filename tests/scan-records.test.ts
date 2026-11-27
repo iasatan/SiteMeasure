@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { compassHeading, loadScanRecords, parseScanRecords, saveScanRecords, type ScanRecord } from '../src/scan/scan-records';
 import { buildScanGeometry } from '../src/scan/scan-geometry';
 import { ScanPage } from '../src/scan/scan-page';
+import { SiteMeasureApp } from '../src/app';
 
 vi.mock('../src/scan/scan-preview', () => ({
   createScanPreview: () => ({ setScan: (records: ScanRecord[]) => ({ count: records.length, triangles: 0 }), dispose: () => {} }),
@@ -13,6 +14,25 @@ function memoryStorage(): Pick<Storage, 'getItem' | 'setItem'> {
 }
 
 describe('scan records', () => {
+  it('navigates between Misc and Scan and cleans up the scan page', () => {
+    const originalUrl = window.location.pathname + window.location.search + window.location.hash;
+    history.replaceState(null, '', '#misc');
+    const root = document.createElement('div');
+    const app = new SiteMeasureApp(root) as unknown as { scanPage: ScanPage };
+    const dispose = vi.spyOn(app.scanPage, 'dispose');
+    expect(root.querySelector('.misc-page h1')?.textContent).toBe('Misc');
+    expect([...root.querySelectorAll('.misc-feature-list button')].map((item) => item.textContent)).toEqual(['Scan→', 'Speedometer→']);
+    root.querySelector<HTMLButtonElement>('.misc-feature-list button')!.click();
+    expect(window.location.hash).toBe('#scan');
+    expect(root.querySelector('.scan-page h1')?.textContent).toBe('Scan');
+    expect([...root.querySelectorAll('.nav-item')].find((item) => item.textContent?.includes('Misc'))?.getAttribute('aria-current')).toBe('location');
+    [...root.querySelectorAll<HTMLButtonElement>('.scan-page button')].find((item) => item.textContent === 'Back to Misc')!.click();
+    expect(window.location.hash).toBe('#misc');
+    expect(root.querySelector('.misc-page h1')?.textContent).toBe('Misc');
+    expect(dispose).toHaveBeenCalledOnce();
+    history.replaceState(null, '', originalUrl);
+    root.remove();
+  });
   it('derives the compass heading from iOS or absolute Android events', () => {
     expect(compassHeading({ alpha: 10, absolute: false, webkitCompassHeading: 123 })).toBe(123);
     expect(compassHeading({ alpha: 90, absolute: true })).toBe(270);
@@ -47,6 +67,10 @@ describe('scan records', () => {
     const page = new ScanPage(storage as Storage, toast, vi.fn());
     const main = document.createElement('main');
     page.render(main);
+    expect([...main.querySelectorAll('.project-tools')].map((group) => [...group.querySelectorAll('button')].map((item) => item.textContent))).toEqual([
+      ['Enable sensors', 'Connect laser', 'Disconnect'],
+      ['Import JSON', 'Download JSON', 'Clear list'],
+    ]);
     const input = main.querySelector<HTMLInputElement>('input[type=file]')!;
     const file = new File([], 'scan.json', { type: 'application/json' });
     Object.defineProperty(file, 'text', { value: () => Promise.resolve(JSON.stringify([existing, imported, imported])) });

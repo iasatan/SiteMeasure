@@ -9,7 +9,7 @@ import { loadScanRecords, orientationFromEvent, parseScanRecords, saveScanRecord
 
 type PermissionedOrientationEvent = typeof DeviceOrientationEvent & { requestPermission?: () => Promise<'granted' | 'denied'> };
 
-/** Hidden page (#scan): each Bluetooth distance is stored with the phone's level and compass at that moment. */
+/** Each Bluetooth distance is stored with the phone's level and compass at that moment. */
 export class ScanPage {
   private records: ScanRecord[];
   private orientation: ScanOrientation | null = null;
@@ -29,7 +29,7 @@ export class ScanPage {
     this.updateLive();
   };
 
-  constructor(private readonly storage: Storage, private readonly toast: (message: string) => void, private readonly downloadText: (text: string, filename: string, mimeType: string) => void) {
+  constructor(private readonly storage: Storage, private readonly toast: (message: string) => void, private readonly downloadText: (text: string, filename: string, mimeType: string) => void, private readonly onBack?: () => void) {
     this.records = loadScanRecords(storage);
   }
 
@@ -41,8 +41,9 @@ export class ScanPage {
     const page = el('section', 'page scan-page');
     const heading = el('div', 'page-heading');
     const title = el('div');
-    title.append(el('p', 'eyebrow', 'Hidden page'), el('h1', '', 'Scan'));
+    title.append(el('p', 'eyebrow', 'Misc'), el('h1', '', 'Scan'));
     heading.append(title);
+    if (this.onBack) heading.append(button('Back to Misc', 'button quiet compact', this.onBack));
     page.append(heading);
 
     const controls = el('div', 'project-tools');
@@ -52,6 +53,24 @@ export class ScanPage {
       button('Disconnect', 'button quiet compact', () => void this.disconnectLaser()),
     );
     page.append(controls);
+
+    const actions = el('div', 'project-tools');
+    const importInput = document.createElement('input');
+    importInput.type = 'file';
+    importInput.accept = '.json,application/json';
+    importInput.hidden = true;
+    importInput.addEventListener('change', () => {
+      const file = importInput.files?.[0];
+      importInput.value = '';
+      if (file) void this.importFile(file);
+    });
+    actions.append(
+      button('Import JSON', 'button quiet compact', () => importInput.click()),
+      button('Download JSON', 'button quiet compact', () => this.download()),
+      button('Clear list', 'button quiet compact', () => this.clear()),
+      importInput,
+    );
+    page.append(actions);
 
     const live = el('p', 'bluetooth-help');
     live.dataset.scanLive = '';
@@ -84,23 +103,6 @@ export class ScanPage {
     list.dataset.scanList = '';
     page.append(list);
 
-    const actions = el('div', 'project-tools');
-    const importInput = document.createElement('input');
-    importInput.type = 'file';
-    importInput.accept = '.json,application/json';
-    importInput.hidden = true;
-    importInput.addEventListener('change', () => {
-      const file = importInput.files?.[0];
-      importInput.value = '';
-      if (file) void this.importFile(file);
-    });
-    actions.append(
-      button('Import JSON', 'button quiet compact', () => importInput.click()),
-      button('Download JSON', 'button quiet compact', () => this.download()),
-      button('Clear list', 'button quiet compact', () => this.clear()),
-      importInput,
-    );
-    page.append(actions);
     main.append(page);
     this.preview = createScanPreview(previewHost);
     if (!this.preview) previewHost.textContent = '3D preview is unavailable in this browser.';
