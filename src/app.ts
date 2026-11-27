@@ -19,6 +19,8 @@ import { floorPlanSvg, measurementsCsv, printableReport, svgToPng } from './repo
 import type { DebugLog } from './debug-log';
 
 type PrimaryView = 'projects' | 'plan' | 'objects' | 'measure' | 'photos' | 'more' | 'ble' | 'scan';
+const primaryViews: readonly string[] = ['projects', 'plan', 'objects', 'measure', 'photos', 'more', 'ble', 'scan'];
+const isPrimaryView = (value: string): value is PrimaryView => primaryViews.includes(value);
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -102,8 +104,14 @@ export class SiteMeasureApp {
   }
 
   private syncHiddenRoute(): void {
-    if (window.location.hash === '#scan') this.view = 'scan';
-    else if (this.view === 'scan') this.view = 'projects';
+    const route = window.location.hash.replace(/^#\/?/, '');
+    if (isPrimaryView(route)) {
+      if (this.view === 'scan' && route !== 'scan') this.scanPage.dispose();
+      this.view = route;
+    } else if (this.view === 'scan') {
+      this.scanPage.dispose();
+      this.view = 'projects';
+    }
   }
 
   private renderShell(): void {
@@ -2194,8 +2202,9 @@ export class SiteMeasureApp {
   private setView(view: PrimaryView): void {
     if (this.view === 'scan' && view !== 'scan') {
       this.scanPage.dispose();
-      if (window.location.hash === '#scan') history.replaceState(null, '', window.location.pathname + window.location.search);
     }
+    const hash = view === 'projects' ? '' : `#${view}`;
+    if (window.location.hash !== hash) history.replaceState(null, '', window.location.pathname + window.location.search + hash);
     this.view = view;
     this.render();
   }
